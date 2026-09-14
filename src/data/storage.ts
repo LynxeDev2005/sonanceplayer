@@ -74,11 +74,40 @@ export async function listLocalTrackFiles(): Promise<string[]> {
 
 export async function deleteTrackFile(filePath: string) {
   try {
-    const info = await FileSystem.getInfoAsync(filePath);
+    const resolved = resolveTrackPath(filePath);
+    const info = await FileSystem.getInfoAsync(resolved);
     if (info.exists) {
-      await FileSystem.deleteAsync(filePath);
+      await FileSystem.deleteAsync(resolved);
     }
   } catch (e) {
     console.warn("Failed to delete track file:", filePath, e);
   }
 }
+
+/**
+ * Resolves a stored audio file path against the active app container directory.
+ * Fixes iOS sideload / update sandbox UUID changes automatically.
+ */
+export function resolveTrackPath(storedPath: string): string {
+  if (!storedPath) return storedPath;
+  if (storedPath.startsWith('http://') || storedPath.startsWith('https://')) {
+    return storedPath;
+  }
+  const filename = storedPath.split('/').pop()?.split('\\').pop() || '';
+  if (!filename) return storedPath;
+  return TRACKS_DIR + filename;
+}
+
+/**
+ * Resolves a stored artwork image path against the active app container directory.
+ */
+export function resolveArtworkPath(storedPath: string | null): string | null {
+  if (!storedPath) return null;
+  if (storedPath.startsWith('http://') || storedPath.startsWith('https://')) {
+    return storedPath;
+  }
+  const filename = storedPath.split('/').pop()?.split('\\').pop() || '';
+  if (!filename) return storedPath;
+  return ARTWORK_DIR + filename;
+}
+

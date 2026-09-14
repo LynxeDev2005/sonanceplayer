@@ -1,16 +1,23 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch, Image, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, radii } from '../../src/theme';
-import { getAllTracks, clearAllTracks, getEqualizerSettings, saveEqualizerSettings } from '../../src/data/database';
-import { getHapticsEnabled, setHapticsEnabled, triggerLightImpact } from '../../src/utils/haptics';
+import { 
+  getAllTracks, 
+  clearAllTracks, 
+  getEqualizerSettings, 
+  saveEqualizerSettings, 
+  getAudioEngineSettings, 
+  saveAudioEngineSettings,
+  getVisualSettings,
+  saveVisualSettings
+} from '../../src/data/database';
+import { getHapticsEnabled, setHapticsEnabled, triggerLightImpact, triggerSelection, triggerSuccess, triggerError } from '../../src/utils/haptics';
 import { router, useFocusEffect } from 'expo-router';
-import { DEFAULT_EQUALIZER_STATE, EqualizerState, VLC_EQUALIZER_PRESETS } from '../../src/data/equalizerPresets';
+import { DEFAULT_EQUALIZER_STATE, EqualizerState } from '../../src/data/equalizerPresets';
 import { PlayerController } from '../../src/player/PlayerController';
-
 import * as Updates from 'expo-updates';
-import { triggerSuccess, triggerError } from '../../src/utils/haptics';
 
 export default function SettingsScreen() {
   const [trackCount, setTrackCount] = useState(0);
@@ -19,15 +26,40 @@ export default function SettingsScreen() {
   const [equalizer, setEqualizer] = useState<EqualizerState>(DEFAULT_EQUALIZER_STATE);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
 
+  // Playback & ReplayGain Settings
+  const [replayGainMode, setReplayGainMode] = useState<'off' | 'track' | 'album'>('off');
+  const [replayGainPreamp, setReplayGainPreamp] = useState(0.0);
+  const [replayGainPreventClipping, setReplayGainPreventClipping] = useState(true);
+  const [gaplessEnabled, setGaplessEnabledState] = useState(true);
+  const [crossfadeDuration, setCrossfadeDurationState] = useState(0.0);
+  
+  // Ambient Visual Waves Settings
+  const [milkyRipplesMode, setMilkyRipplesMode] = useState<'off' | 'subtle' | 'expressive'>('expressive');
+
   useFocusEffect(
     React.useCallback(() => {
       setTrackCount(getAllTracks().length);
       setHapticFeedbackState(getHapticsEnabled());
+      
       const savedEqualizer = getEqualizerSettings();
       if (savedEqualizer) {
         setEqualizer(savedEqualizer);
         PlayerController.setEqualizerBands(savedEqualizer.bands, savedEqualizer.preamp);
         PlayerController.setEqualizerEnabled(savedEqualizer.enabled);
+      }
+
+      const audioSettings = getAudioEngineSettings();
+      if (audioSettings) {
+        setReplayGainMode(audioSettings.replayGainMode);
+        setReplayGainPreamp(audioSettings.replayGainPreamp);
+        setReplayGainPreventClipping(audioSettings.replayGainPreventClipping);
+        setGaplessEnabledState(audioSettings.gaplessEnabled);
+        setCrossfadeDurationState(audioSettings.crossfadeDuration);
+      }
+
+      const visual = getVisualSettings();
+      if (visual) {
+        setMilkyRipplesMode(visual.milkyRipples);
       }
     }, [])
   );
@@ -73,11 +105,52 @@ export default function SettingsScreen() {
     }
   };
 
-  const applyEqualizer = (next: EqualizerState) => {
-    setEqualizer(next);
-    saveEqualizerSettings(next);
-    PlayerController.setEqualizerBands(next.bands, next.preamp);
-    PlayerController.setEqualizerEnabled(next.enabled);
+  const toggleEqualizer = (enabled: boolean) => {
+    triggerLightImpact();
+    const updated = { ...equalizer, enabled };
+    setEqualizer(updated);
+    saveEqualizerSettings(updated);
+    PlayerController.setEqualizerEnabled(enabled);
+  };
+
+  const applyReplayGainMode = (mode: 'off' | 'track' | 'album') => {
+    triggerSelection();
+    setReplayGainMode(mode);
+    PlayerController.setReplayGain(mode, replayGainPreamp, replayGainPreventClipping);
+  };
+
+  const adjustReplayGainPreamp = (delta: number) => {
+    triggerLightImpact();
+    const nextVal = Math.round((replayGainPreamp + delta) * 2) / 2;
+    const clamped = Math.max(-6.0, Math.min(6.0, nextVal));
+    setReplayGainPreamp(clamped);
+    PlayerController.setReplayGain(replayGainMode, clamped, replayGainPreventClipping);
+  };
+
+  const togglePreventClipping = (enabled: boolean) => {
+    triggerLightImpact();
+    setReplayGainPreventClipping(enabled);
+    PlayerController.setReplayGain(replayGainMode, replayGainPreamp, enabled);
+  };
+
+  const toggleGapless = (enabled: boolean) => {
+    triggerLightImpact();
+    setGaplessEnabledState(enabled);
+    PlayerController.setGaplessEnabled(enabled);
+  };
+
+  const adjustCrossfade = (delta: number) => {
+    triggerLightImpact();
+    const nextVal = Math.round((crossfadeDuration + delta) * 2) / 2;
+    const clamped = Math.max(0, Math.min(12, nextVal));
+    setCrossfadeDurationState(clamped);
+    PlayerController.setCrossfadeDuration(clamped);
+  };
+
+  const applyMilkyRipplesMode = (mode: 'off' | 'subtle' | 'expressive') => {
+    triggerSelection();
+    setMilkyRipplesMode(mode);
+    saveVisualSettings({ milkyRipples: mode });
   };
 
   const handleClearLibrary = () => {
@@ -104,110 +177,108 @@ export default function SettingsScreen() {
       <Text style={styles.largeTitle}>Settings</Text>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Section: Library Management */}
-        <Text style={styles.sectionHeader}>LIBRARY & STORAGE</Text>
+        
+        {/* ===================== CARD 1: AUDIO ENGINE & DSP ===================== */}
+        <Text style={styles.sectionHeader}>AUDIO ENGINE & DSP</Text>
         <View style={styles.card}>
+          
+          {/* Equalizer Navigation Row */}
+          <TouchableOpacity 
+            style={styles.row} 
+            onPress={() => router.push('/equalizer')} 
+            activeOpacity={0.7}
+          >
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconBox, { backgroundColor: '#6366F1' }]}>
+                <Ionicons name="options" size={17} color={colors.white} />
+              </View>
+              <View style={styles.rowTextContainer}>
+                <Text style={styles.rowLabel}>10-Band Equalizer</Text>
+                <Text style={styles.rowHint}>
+                  {equalizer.enabled ? `${equalizer.presetName} (Active)` : 'Bypassed'}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.rowRightControls}>
+              <Switch
+                value={equalizer.enabled}
+                onValueChange={toggleEqualizer}
+                trackColor={{ true: colors.tint, false: '#CBD5E1' }}
+              />
+              <Ionicons name="chevron-forward" size={18} color="#94A3B8" style={{ marginLeft: 8 }} />
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.divider} />
+
+          {/* Gapless Playback */}
           <View style={styles.row}>
             <View style={styles.rowLeft}>
-              <View style={[styles.iconBox, { backgroundColor: '#3B82F6' }]}>
-                <Ionicons name="musical-notes" size={18} color={colors.white} />
+              <View style={[styles.iconBox, { backgroundColor: '#059669' }]}>
+                <Ionicons name="infinite" size={18} color={colors.white} />
               </View>
-              <Text style={styles.rowLabel}>Total Songs</Text>
+              <View style={styles.rowTextContainer}>
+                <Text style={styles.rowLabel}>Gapless Playback</Text>
+                <Text style={styles.rowHint}>0ms instant album track transitions</Text>
+              </View>
             </View>
-            <Text style={styles.rowValue}>{trackCount} tracks</Text>
+            <Switch 
+              value={gaplessEnabled} 
+              onValueChange={toggleGapless} 
+              trackColor={{ true: colors.tint, false: '#CBD5E1' }}
+            />
           </View>
-          
-          <View style={styles.divider} />
-
-          <TouchableOpacity style={styles.row} onPress={() => router.push('/import')}>
-            <View style={styles.rowLeft}>
-              <View style={[styles.iconBox, { backgroundColor: '#10B981' }]}>
-                <Ionicons name="cloud-upload" size={18} color={colors.white} />
-              </View>
-              <Text style={styles.rowLabel}>Import Music</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} />
-          </TouchableOpacity>
 
           <View style={styles.divider} />
 
-          <TouchableOpacity style={styles.row} onPress={handleClearLibrary}>
-            <View style={styles.rowLeft}>
-              <View style={[styles.iconBox, { backgroundColor: '#EF4444' }]}>
-                <Ionicons name="trash" size={18} color={colors.white} />
-              </View>
-              <Text style={[styles.rowLabel, { color: '#EF4444' }]}>Clear Library</Text>
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        {/* Section: Audio Engine */}
-        <Text style={styles.sectionHeader}>AUDIO ENGINE</Text>
-        <View style={styles.card}>
+          {/* Equal-Power Crossfade */}
           <View style={styles.row}>
             <View style={styles.rowLeft}>
               <View style={[styles.iconBox, { backgroundColor: '#8B5CF6' }]}>
-                <Ionicons name="hardware-chip" size={18} color={colors.white} />
+                <Ionicons name="git-compare" size={17} color={colors.white} />
               </View>
-              <Text style={styles.rowLabel}>Engine Mode</Text>
+              <View style={styles.rowTextContainer}>
+                <Text style={styles.rowLabel}>Equal-Power Crossfade</Text>
+                <Text style={styles.rowHint}>
+                  {crossfadeDuration === 0 ? 'Disabled (Instant 0ms gapless)' : `${crossfadeDuration.toFixed(1)}s equal-power blend`}
+                </Text>
+              </View>
             </View>
-            <Text style={styles.rowValue}>Hybrid Native (AVPlayer)</Text>
+            <View style={styles.stepperContainer}>
+              <TouchableOpacity 
+                style={[styles.stepBtn, crossfadeDuration <= 0 && styles.stepBtnDisabled]} 
+                onPress={() => adjustCrossfade(-0.5)}
+                disabled={crossfadeDuration <= 0}
+                activeOpacity={0.6}
+              >
+                <Ionicons name="remove" size={15} color={crossfadeDuration <= 0 ? '#CBD5E1' : '#0F172A'} />
+              </TouchableOpacity>
+              <Text style={styles.stepperValue}>
+                {crossfadeDuration === 0 ? 'Off' : `${crossfadeDuration.toFixed(1)}s`}
+              </Text>
+              <TouchableOpacity 
+                style={[styles.stepBtn, crossfadeDuration >= 12 && styles.stepBtnDisabled]} 
+                onPress={() => adjustCrossfade(0.5)}
+                disabled={crossfadeDuration >= 12}
+                activeOpacity={0.6}
+              >
+                <Ionicons name="add" size={15} color={crossfadeDuration >= 12 ? '#CBD5E1' : '#0F172A'} />
+              </TouchableOpacity>
+            </View>
           </View>
 
           <View style={styles.divider} />
 
-          <TouchableOpacity style={styles.row} onPress={() => router.push('/equalizer')} activeOpacity={0.7}>
-            <View style={styles.rowLeft}>
-              <View style={[styles.iconBox, { backgroundColor: '#0EA5E9' }]}>
-                <Ionicons name="options" size={18} color={colors.white} />
-              </View>
-              <View>
-                <Text style={styles.rowLabel}>10-Band Equalizer</Text>
-                <Text style={styles.rowHint}>{equalizer.enabled ? `${equalizer.presetName} (Active)` : 'Bypassed'}</Text>
-              </View>
-            </View>
-            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-              <Switch
-                value={equalizer.enabled}
-                onValueChange={(enabled) => applyEqualizer({ ...equalizer, enabled })}
-                trackColor={{ true: colors.tint, false: '#CBD5E1' }}
-              />
-              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} style={{ marginLeft: 8 }} />
-            </View>
-          </TouchableOpacity>
-
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.presetList}
-          >
-            {VLC_EQUALIZER_PRESETS.map((preset) => {
-              const selected = preset.name === equalizer.presetName;
-              return (
-                <TouchableOpacity
-                  key={preset.id}
-                  style={[styles.preset, selected && styles.presetSelected]}
-                  onPress={() => applyEqualizer({
-                    enabled: true,
-                    presetName: preset.name,
-                    bands: preset.bands,
-                    preamp: preset.preamp,
-                  })}
-                >
-                  <Text style={[styles.presetText, selected && styles.presetTextSelected]}>{preset.name}</Text>
-                </TouchableOpacity>
-              );
-            })}
-          </ScrollView>
-
-          <View style={styles.divider} />
-
+          {/* Lossless Audio Output */}
           <View style={styles.row}>
             <View style={styles.rowLeft}>
               <View style={[styles.iconBox, { backgroundColor: '#EC4899' }]}>
-                <Ionicons name="sparkles" size={18} color={colors.white} />
+                <Ionicons name="sparkles" size={17} color={colors.white} />
               </View>
-              <Text style={styles.rowLabel}>Lossless Output</Text>
+              <View style={styles.rowTextContainer}>
+                <Text style={styles.rowLabel}>Lossless Pipeline</Text>
+                <Text style={styles.rowHint}>Direct 32-bit floating point audio bus</Text>
+              </View>
             </View>
             <Switch 
               value={losslessAudio} 
@@ -215,15 +286,187 @@ export default function SettingsScreen() {
               trackColor={{ true: colors.tint, false: '#CBD5E1' }}
             />
           </View>
+        </View>
+
+        {/* ===================== CARD 2: LOUDNESS NORMALIZATION ===================== */}
+        <Text style={styles.sectionHeader}>LOUDNESS NORMALIZATION (REPLAYGAIN)</Text>
+        <View style={styles.card}>
+          
+          {/* ReplayGain Section Header Row */}
+          <View style={[styles.row, { paddingBottom: 6 }]}>
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconBox, { backgroundColor: '#0D9488' }]}>
+                <Ionicons name="volume-medium" size={18} color={colors.white} />
+              </View>
+              <View style={styles.rowTextContainer}>
+                <Text style={styles.rowLabel}>Loudness Leveling</Text>
+                <Text style={styles.rowHint}>ITU-R BS.1770 / EBU R128 standard</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Sleek Segmented 3-Way Selector */}
+          <View style={styles.segmentedContainer}>
+            {(['off', 'track', 'album'] as const).map((mode) => {
+              const active = replayGainMode === mode;
+              const label = mode === 'off' ? 'Off' : mode === 'track' ? 'Track Gain' : 'Album Gain';
+              return (
+                <TouchableOpacity
+                  key={mode}
+                  style={[styles.segmentedPill, active && styles.segmentedPillActive]}
+                  onPress={() => applyReplayGainMode(mode)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.segmentedText, active && styles.segmentedTextActive]}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Extra ReplayGain Controls when Active */}
+          {replayGainMode !== 'off' && (
+            <>
+              <View style={styles.divider} />
+
+              {/* Preamp Stepper */}
+              <View style={styles.row}>
+                <View style={styles.rowLeft}>
+                  <View style={[styles.iconBox, { backgroundColor: '#2563EB' }]}>
+                    <Ionicons name="speedometer" size={17} color={colors.white} />
+                  </View>
+                  <View style={styles.rowTextContainer}>
+                    <Text style={styles.rowLabel}>Target Preamp</Text>
+                    <Text style={styles.rowHint}>Reference offset (-6 dB to +6 dB)</Text>
+                  </View>
+                </View>
+                <View style={styles.stepperContainer}>
+                  <TouchableOpacity 
+                    style={[styles.stepBtn, replayGainPreamp <= -6 && styles.stepBtnDisabled]} 
+                    onPress={() => adjustReplayGainPreamp(-0.5)}
+                    disabled={replayGainPreamp <= -6}
+                    activeOpacity={0.6}
+                  >
+                    <Ionicons name="remove" size={15} color={replayGainPreamp <= -6 ? '#CBD5E1' : '#0F172A'} />
+                  </TouchableOpacity>
+                  <Text style={styles.stepperValue}>
+                    {replayGainPreamp > 0 ? `+${replayGainPreamp.toFixed(1)} dB` : `${replayGainPreamp.toFixed(1)} dB`}
+                  </Text>
+                  <TouchableOpacity 
+                    style={[styles.stepBtn, replayGainPreamp >= 6 && styles.stepBtnDisabled]} 
+                    onPress={() => adjustReplayGainPreamp(0.5)}
+                    disabled={replayGainPreamp >= 6}
+                    activeOpacity={0.6}
+                  >
+                    <Ionicons name="add" size={15} color={replayGainPreamp >= 6 ? '#CBD5E1' : '#0F172A'} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <View style={styles.divider} />
+
+              {/* Anti-Clipping Limiter */}
+              <View style={styles.row}>
+                <View style={styles.rowLeft}>
+                  <View style={[styles.iconBox, { backgroundColor: '#F59E0B' }]}>
+                    <Ionicons name="shield-checkmark" size={17} color={colors.white} />
+                  </View>
+                  <View style={styles.rowTextContainer}>
+                    <Text style={styles.rowLabel}>Anti-Clipping Guard</Text>
+                    <Text style={styles.rowHint}>Prevents distortion on peak dynamics</Text>
+                  </View>
+                </View>
+                <Switch 
+                  value={replayGainPreventClipping} 
+                  onValueChange={togglePreventClipping} 
+                  trackColor={{ true: colors.tint, false: '#CBD5E1' }}
+                />
+              </View>
+            </>
+          )}
+        </View>
+
+        {/* ===================== CARD: AMBIENT VISUALS & LIQUID WAVES ===================== */}
+        <Text style={styles.sectionHeader}>AMBIENT VISUALS & LIQUID WAVES</Text>
+        <View style={styles.card}>
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconBox, { backgroundColor: '#38BDF8' }]}>
+                <Ionicons name="water" size={17} color={colors.white} />
+              </View>
+              <View style={styles.rowTextContainer}>
+                <Text style={styles.rowLabel}>Milky Liquid Ripples</Text>
+                <Text style={styles.rowHint}>Circular water wave propagation from music</Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.segmentedContainer}>
+            {(['off', 'subtle', 'expressive'] as const).map((mode) => {
+              const active = milkyRipplesMode === mode;
+              const label = mode === 'off' ? 'Off' : mode === 'subtle' ? 'Subtle' : 'Expressive';
+              return (
+                <TouchableOpacity
+                  key={mode}
+                  style={[styles.segmentedPill, active && styles.segmentedPillActive]}
+                  onPress={() => applyMilkyRipplesMode(mode)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.segmentedText, active && styles.segmentedTextActive]}>{label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </View>
+
+        {/* ===================== CARD 3: LIBRARY & PREFERENCES ===================== */}
+        <Text style={styles.sectionHeader}>LIBRARY & PREFERENCES</Text>
+        <View style={styles.card}>
+          
+          {/* Total Songs */}
+          <View style={styles.row}>
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconBox, { backgroundColor: '#3B82F6' }]}>
+                <Ionicons name="musical-notes" size={17} color={colors.white} />
+              </View>
+              <Text style={styles.rowLabel}>Total Songs</Text>
+            </View>
+            <View style={styles.countBadge}>
+              <Text style={styles.countBadgeText}>{trackCount} tracks</Text>
+            </View>
+          </View>
+          
+          <View style={styles.divider} />
+
+          {/* Import Music */}
+          <TouchableOpacity 
+            style={styles.row} 
+            onPress={() => router.push('/import')}
+            activeOpacity={0.7}
+          >
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconBox, { backgroundColor: '#10B981' }]}>
+                <Ionicons name="cloud-upload" size={17} color={colors.white} />
+              </View>
+              <View style={styles.rowTextContainer}>
+                <Text style={styles.rowLabel}>Import Music</Text>
+                <Text style={styles.rowHint}>Files, iCloud Drive, or WiFi Transfer</Text>
+              </View>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#94A3B8" />
+          </TouchableOpacity>
 
           <View style={styles.divider} />
 
+          {/* Haptic Feedback */}
           <View style={styles.row}>
             <View style={styles.rowLeft}>
-              <View style={[styles.iconBox, { backgroundColor: '#F59E0B' }]}>
-                <Ionicons name="finger-print" size={18} color={colors.white} />
+              <View style={[styles.iconBox, { backgroundColor: '#F97316' }]}>
+                <Ionicons name="finger-print" size={17} color={colors.white} />
               </View>
-              <Text style={styles.rowLabel}>Haptic Feedback</Text>
+              <View style={styles.rowTextContainer}>
+                <Text style={styles.rowLabel}>Haptic Feedback</Text>
+                <Text style={styles.rowHint}>Tactile response on playback controls</Text>
+              </View>
             </View>
             <Switch 
               value={hapticFeedback} 
@@ -235,11 +478,29 @@ export default function SettingsScreen() {
               trackColor={{ true: colors.tint, false: '#CBD5E1' }}
             />
           </View>
+
+          <View style={styles.divider} />
+
+          {/* Clear Library */}
+          <TouchableOpacity 
+            style={styles.row} 
+            onPress={handleClearLibrary}
+            activeOpacity={0.7}
+          >
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconBox, { backgroundColor: '#FEE2E2' }]}>
+                <Ionicons name="trash" size={17} color="#EF4444" />
+              </View>
+              <Text style={[styles.rowLabel, { color: '#EF4444' }]}>Clear Music Library</Text>
+            </View>
+          </TouchableOpacity>
         </View>
 
-        {/* Section: Over-the-Air Updates */}
-        <Text style={styles.sectionHeader}>OVER-THE-AIR UPDATES</Text>
+        {/* ===================== CARD 4: UPDATES & ABOUT ===================== */}
+        <Text style={styles.sectionHeader}>UPDATES & ABOUT</Text>
         <View style={styles.card}>
+          
+          {/* OTA Updates */}
           <TouchableOpacity 
             style={styles.row} 
             onPress={handleCheckForUpdates} 
@@ -247,54 +508,52 @@ export default function SettingsScreen() {
             activeOpacity={0.7}
           >
             <View style={styles.rowLeft}>
-              <View style={[styles.iconBox, { backgroundColor: '#3B82F6' }]}>
-                <Ionicons name="cloud-download" size={18} color={colors.white} />
+              <View style={[styles.iconBox, { backgroundColor: '#0284C7' }]}>
+                <Ionicons name="cloud-download" size={17} color={colors.white} />
               </View>
-              <View>
+              <View style={styles.rowTextContainer}>
                 <Text style={styles.rowLabel}>Check for Updates</Text>
                 <Text style={styles.rowHint}>
-                  {isCheckingUpdate ? "Connecting to update server..." : `Update ID: ${Updates.updateId ? Updates.updateId.slice(0, 8) : 'Latest (Local)'}`}
+                  {isCheckingUpdate ? "Checking server..." : `OTA ID: ${Updates.updateId ? Updates.updateId.slice(0, 8) : 'Latest (Local)'}`}
                 </Text>
               </View>
             </View>
-            <Ionicons name="refresh" size={18} color={colors.tint} />
+            {isCheckingUpdate ? (
+              <ActivityIndicator size="small" color={colors.tint} />
+            ) : (
+              <Ionicons name="refresh" size={18} color={colors.tint} />
+            )}
           </TouchableOpacity>
-        </View>
 
-        {/* Section: About */}
-        <Text style={styles.sectionHeader}>ABOUT</Text>
-        <View style={styles.card}>
-          <View style={{ alignItems: 'center', paddingVertical: spacing.md }}>
+          <View style={styles.divider} />
+
+          {/* App Branding & Specs */}
+          <View style={styles.aboutContainer}>
             <Image 
               source={require('../../assets/sonance-logo-black.png')} 
-              style={{ width: 150, height: 35, resizeMode: 'contain', marginBottom: 6 }} 
+              style={styles.aboutLogo} 
             />
-            <Text style={{ fontSize: typography.sizes.xs, color: colors.textSecondary, fontWeight: '500' }}>
-              Audiophile Music Player
-            </Text>
-          </View>
+            <Text style={styles.aboutTagline}>Audiophile Music Player</Text>
 
-          <View style={styles.divider} />
-
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>App Version</Text>
-            <Text style={styles.rowValue}>1.0.0</Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Channel</Text>
-            <Text style={styles.rowValue}>{Updates.channel || 'master'}</Text>
-          </View>
-
-          <View style={styles.divider} />
-
-          <View style={styles.row}>
-            <Text style={styles.rowLabel}>Architecture</Text>
-            <Text style={styles.rowValue}>Swift Native Engine + Expo 57</Text>
+            <View style={styles.aboutSpecs}>
+              <View style={styles.specItem}>
+                <Text style={styles.specLabel}>Version</Text>
+                <Text style={styles.specValue}>1.0.0</Text>
+              </View>
+              <View style={styles.specDivider} />
+              <View style={styles.specItem}>
+                <Text style={styles.specLabel}>Channel</Text>
+                <Text style={styles.specValue}>{Updates.channel || 'master'}</Text>
+              </View>
+              <View style={styles.specDivider} />
+              <View style={styles.specItem}>
+                <Text style={styles.specLabel}>Engine</Text>
+                <Text style={styles.specValue}>Swift Dual-Node</Text>
+              </View>
+            </View>
           </View>
         </View>
+
       </ScrollView>
     </SafeAreaView>
   );
@@ -309,95 +568,213 @@ const styles = StyleSheet.create({
     fontSize: 32,
     fontWeight: '800',
     color: colors.text,
-    letterSpacing: -0.5,
+    letterSpacing: -0.6,
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.xs,
-    marginBottom: spacing.md,
+    marginBottom: spacing.xs,
   },
   scrollContent: {
-    paddingHorizontal: spacing.lg,
+    paddingHorizontal: spacing.md,
     paddingBottom: 160,
   },
   sectionHeader: {
-    fontSize: typography.sizes.xs,
-    fontWeight: typography.weights.bold,
-    color: colors.textSecondary,
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#64748B',
     letterSpacing: 0.8,
-    marginBottom: spacing.xs,
-    marginTop: spacing.md,
-    marginLeft: spacing.xs,
+    marginBottom: 6,
+    marginTop: 18,
+    marginLeft: 12,
+    textTransform: 'uppercase',
   },
   card: {
-    backgroundColor: colors.white,
-    borderRadius: radii.xl,
-    paddingVertical: spacing.xs,
-    marginBottom: spacing.md,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
+    backgroundColor: '#FFFFFF',
+    borderRadius: 16,
+    paddingVertical: 2,
+    marginBottom: 4,
+    shadowColor: '#000000',
+    shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.04,
-    shadowRadius: 8,
+    shadowRadius: 6,
     elevation: 2,
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.6)',
   },
   row: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: spacing.sm + 2,
-    paddingHorizontal: spacing.md,
+    justifyContent: 'space-between',
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    minHeight: 52,
   },
   rowLeft: {
     flexDirection: 'row',
     alignItems: 'center',
+    flex: 1,
+    paddingRight: 10,
   },
   iconBox: {
-    width: 28,
-    height: 28,
-    borderRadius: radii.sm,
-    justifyContent: 'center',
+    width: 32,
+    height: 32,
+    borderRadius: 8,
     alignItems: 'center',
-    marginRight: spacing.md,
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  rowTextContainer: {
+    flex: 1,
+    justifyContent: 'center',
   },
   rowLabel: {
-    fontSize: typography.sizes.md,
-    color: colors.text,
-    fontWeight: typography.weights.medium,
-  },
-  rowValue: {
-    fontSize: typography.sizes.sm,
-    color: colors.textSecondary,
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#0F172A',
+    letterSpacing: -0.2,
   },
   rowHint: {
-    fontSize: typography.sizes.xs,
-    color: colors.textSecondary,
-    marginTop: 1,
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 1.5,
+    fontWeight: '400',
   },
-  presetList: {
-    paddingHorizontal: spacing.md,
-    paddingBottom: spacing.sm,
-    gap: spacing.xs,
+  rowRightControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  preset: {
-    borderWidth: 1,
-    borderColor: '#D8E2EA',
+  countBadge: {
+    backgroundColor: '#F1F5F9',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: radii.round,
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm + 2,
   },
-  presetSelected: {
-    backgroundColor: colors.tint,
-    borderColor: colors.tint,
+  countBadgeText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#475569',
   },
-  presetText: {
-    color: colors.textSecondary,
-    fontSize: typography.sizes.xs,
-    fontWeight: typography.weights.semibold,
+  segmentedContainer: {
+    flexDirection: 'row',
+    backgroundColor: '#F1F5F9',
+    borderRadius: 10,
+    padding: 3,
+    marginHorizontal: 14,
+    marginTop: 2,
+    marginBottom: 10,
   },
-  presetTextSelected: {
-    color: colors.white,
+  segmentedPill: {
+    flex: 1,
+    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+  },
+  segmentedPillActive: {
+    backgroundColor: '#FFFFFF',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.12,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  segmentedText: {
+    fontSize: 12.5,
+    fontWeight: '500',
+    color: '#64748B',
+  },
+  segmentedTextActive: {
+    color: '#0F172A',
+    fontWeight: '700',
+  },
+  stepperContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#F1F5F9',
+    borderRadius: radii.round,
+    paddingHorizontal: 3,
+    paddingVertical: 2,
+  },
+  stepBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 1.5,
+    elevation: 1,
+  },
+  stepBtnDisabled: {
+    backgroundColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  stepperValue: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0F172A',
+    paddingHorizontal: 8,
+    minWidth: 58,
+    textAlign: 'center',
   },
   divider: {
-    height: 1,
-    backgroundColor: 'rgba(0,0,0,0.05)',
-    marginLeft: spacing.md + 28 + spacing.md,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: '#E2E8F0',
+    marginLeft: 58,
+  },
+  aboutContainer: {
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+  },
+  aboutLogo: {
+    width: 140,
+    height: 32,
+    resizeMode: 'contain',
+    marginBottom: 4,
+  },
+  aboutTagline: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '500',
+    marginBottom: spacing.md,
+  },
+  aboutSpecs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-around',
+    width: '100%',
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  specItem: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  specLabel: {
+    fontSize: 11,
+    color: '#94A3B8',
+    fontWeight: '500',
+    marginBottom: 2,
+    textTransform: 'uppercase',
+  },
+  specValue: {
+    fontSize: 12.5,
+    color: '#1E293B',
+    fontWeight: '700',
+  },
+  specDivider: {
+    width: 1,
+    height: 24,
+    backgroundColor: '#E2E8F0',
   },
 });
+
+

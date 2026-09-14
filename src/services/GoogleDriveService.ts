@@ -4,7 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Crypto from 'expo-crypto';
 import { TRACKS_DIR, saveArtwork, initStorage } from '../data/storage';
 import { getAllTracks, insertTracksBatch, DBTrack } from '../data/database';
-import { extractMetadata } from '../../modules/sonance-audio/src';
+import { extractMetadata, ExtractedMetadata } from '../../modules/sonance-audio/src';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -352,12 +352,16 @@ class GoogleDriveServiceClass {
       throw new Error(`Failed to download ${file.name}, HTTP status: ${downloadResult.status}`);
     }
 
-    const fallbackMeta = {
+    const fallbackMeta: ExtractedMetadata = {
       title: undefined,
       artist: undefined,
       album: undefined,
       duration: 0,
       artworkBase64: undefined,
+      replayGainTrack: undefined,
+      replayGainAlbum: undefined,
+      replayGainTrackPeak: undefined,
+      replayGainAlbumPeak: undefined,
     };
 
     const metadata = await extractMetadata(localDestPath).catch(() => fallbackMeta);
@@ -392,6 +396,10 @@ class GoogleDriveServiceClass {
       file_path: localDestPath,
       artwork_path: artworkPath,
       added_at: Date.now(),
+      replaygain_track_gain: metadata.replayGainTrack ?? null,
+      replaygain_track_peak: metadata.replayGainTrackPeak ?? null,
+      replaygain_album_gain: metadata.replayGainAlbum ?? null,
+      replaygain_album_peak: metadata.replayGainAlbumPeak ?? null,
     };
 
     insertTracksBatch([dbTrack]);
@@ -486,12 +494,16 @@ class GoogleDriveServiceClass {
           }
 
           // Native metadata extraction
-          const fallbackMeta = {
+          const fallbackMeta: ExtractedMetadata = {
             title: undefined,
             artist: undefined,
             album: undefined,
             duration: 0,
             artworkBase64: undefined,
+            replayGainTrack: undefined,
+            replayGainAlbum: undefined,
+            replayGainTrackPeak: undefined,
+            replayGainAlbumPeak: undefined,
           };
 
           const metadata = await extractMetadata(localDestPath).catch(() => fallbackMeta);
@@ -526,6 +538,10 @@ class GoogleDriveServiceClass {
             file_path: localDestPath,
             artwork_path: artworkPath,
             added_at: Date.now(),
+            replaygain_track_gain: metadata.replayGainTrack ?? null,
+            replaygain_track_peak: metadata.replayGainTrackPeak ?? null,
+            replaygain_album_gain: metadata.replayGainAlbum ?? null,
+            replaygain_album_peak: metadata.replayGainAlbumPeak ?? null,
           };
 
           importedTracks.push(dbTrack);

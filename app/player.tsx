@@ -12,9 +12,10 @@ import { PlayerController } from '../src/player/PlayerController';
 import { usePlaybackState } from '../src/player/hooks';
 import { TrackInfo } from '../modules/sonance-audio/src';
 import { triggerLightImpact, triggerMediumImpact, triggerSelection } from '../src/utils/haptics';
+import { getVisualSettings } from '../src/data/database';
 
 export default function PlayerScreen() {
-  const { width } = useWindowDimensions();
+  const { width, height } = useWindowDimensions();
   const playbackState = usePlaybackState();
   const { currentTrack, isPlaying, shuffle, repeatMode, currentIndex, position = 0, duration = 1 } = playbackState;
   
@@ -22,6 +23,14 @@ export default function PlayerScreen() {
   const [sleepTimerActive, setSleepTimerActive] = useState(false);
   const [sleepTimerRemaining, setSleepTimerRemaining] = useState<number | null>(null);
   const [selectedTrackForMenu, setSelectedTrackForMenu] = useState<TrackInfo | null>(null);
+  const [milkyRipplesMode, setMilkyRipplesMode] = useState<'off' | 'subtle' | 'expressive'>('expressive');
+
+  useEffect(() => {
+    const visual = getVisualSettings();
+    if (visual) {
+      setMilkyRipplesMode(visual.milkyRipples);
+    }
+  }, []);
 
   // Responsive Drag State for Slider
   const [isDragging, setIsDragging] = useState(false);
@@ -221,8 +230,16 @@ export default function PlayerScreen() {
 
   return (
     <View style={styles.container}>
-      {/* 4-Oscillator Harmonic Light Mode Liquid Glass Background */}
-      <LiquidBackground style={StyleSheet.absoluteFill} blurIntensity={88} showCaustics={true} />
+      {/* 4-Oscillator Harmonic Light Mode Liquid Glass Background with Milky Wave Ripples */}
+      <LiquidBackground 
+        style={StyleSheet.absoluteFill} 
+        blurIntensity={85} 
+        showCaustics={true}
+        showRipples={milkyRipplesMode !== 'off'}
+        isPlaying={isPlaying}
+        rippleIntensity={milkyRipplesMode}
+        rippleCenterY={height * 0.35}
+      />
 
       <SafeAreaView style={styles.safeArea}>
         {/* Liquid Glass Header */}

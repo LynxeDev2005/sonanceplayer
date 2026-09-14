@@ -2,7 +2,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import { copyFileToLocal, saveArtwork, listLocalTrackFiles, TRACKS_DIR } from '../data/storage';
 import { insertTracksBatch, getAllTracks, DBTrack } from '../data/database';
-import { extractMetadata } from '../../modules/sonance-audio/src';
+import { extractMetadata, ExtractedMetadata } from '../../modules/sonance-audio/src';
 import * as Crypto from 'expo-crypto';
 
 export type ImportProgressCallback = (
@@ -141,12 +141,16 @@ export async function importFromFiles(onProgress?: ImportProgressCallback): Prom
     try {
       const localFilePath = await copyFileToLocal(asset.uri, asset.name);
 
-      const fallbackMeta = {
+      const fallbackMeta: ExtractedMetadata = {
         title: undefined,
         artist: undefined,
         album: undefined,
         duration: 0,
         artworkBase64: undefined,
+        replayGainTrack: undefined,
+        replayGainAlbum: undefined,
+        replayGainTrackPeak: undefined,
+        replayGainAlbumPeak: undefined,
       };
 
       const metadata = await withTimeout(
@@ -192,6 +196,10 @@ export async function importFromFiles(onProgress?: ImportProgressCallback): Prom
         file_path: localFilePath,
         artwork_path: artworkPath,
         added_at: Date.now(),
+        replaygain_track_gain: metadata.replayGainTrack ?? null,
+        replaygain_track_peak: metadata.replayGainTrackPeak ?? null,
+        replaygain_album_gain: metadata.replayGainAlbum ?? null,
+        replaygain_album_peak: metadata.replayGainAlbumPeak ?? null,
       };
 
       importedTracks.push(dbTrack);
@@ -244,12 +252,16 @@ export async function scanAndSyncLocalLibrary(onProgress?: ImportProgressCallbac
     const localFilePath = TRACKS_DIR + fileName;
 
     try {
-      const fallbackMeta = {
+      const fallbackMeta: ExtractedMetadata = {
         title: undefined,
         artist: undefined,
         album: undefined,
         duration: 0,
         artworkBase64: undefined,
+        replayGainTrack: undefined,
+        replayGainAlbum: undefined,
+        replayGainTrackPeak: undefined,
+        replayGainAlbumPeak: undefined,
       };
 
       const metadata = await withTimeout(
@@ -290,6 +302,10 @@ export async function scanAndSyncLocalLibrary(onProgress?: ImportProgressCallbac
         file_path: localFilePath,
         artwork_path: artworkPath,
         added_at: Date.now(),
+        replaygain_track_gain: metadata.replayGainTrack ?? null,
+        replaygain_track_peak: metadata.replayGainTrackPeak ?? null,
+        replaygain_album_gain: metadata.replayGainAlbum ?? null,
+        replaygain_album_peak: metadata.replayGainAlbumPeak ?? null,
       };
 
       importedTracks.push(dbTrack);
@@ -428,12 +444,16 @@ export async function scanFolderAndImport(onProgress?: ImportProgressCallback): 
     try {
       const localFilePath = await copyFileToLocal(uri, name);
 
-      const fallbackMeta = {
+      const fallbackMeta: ExtractedMetadata = {
         title: undefined,
         artist: undefined,
         album: undefined,
         duration: 0,
         artworkBase64: undefined,
+        replayGainTrack: undefined,
+        replayGainAlbum: undefined,
+        replayGainTrackPeak: undefined,
+        replayGainAlbumPeak: undefined,
       };
 
       const metadata = await withTimeout(
@@ -479,6 +499,10 @@ export async function scanFolderAndImport(onProgress?: ImportProgressCallback): 
         file_path: localFilePath,
         artwork_path: artworkPath,
         added_at: Date.now(),
+        replaygain_track_gain: metadata.replayGainTrack ?? null,
+        replaygain_track_peak: metadata.replayGainTrackPeak ?? null,
+        replaygain_album_gain: metadata.replayGainAlbum ?? null,
+        replaygain_album_peak: metadata.replayGainAlbumPeak ?? null,
       };
 
       importedTracks.push(dbTrack);

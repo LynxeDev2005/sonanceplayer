@@ -9,6 +9,14 @@ export type TrackInfo = {
   filePath: string;
   artworkUrl?: string;
   duration?: number;
+  replayGainTrack?: number;
+  replayGainAlbum?: number;
+  replayGainTrackPeak?: number;
+  replayGainAlbumPeak?: number;
+  replaygain_track_gain?: number | null;
+  replaygain_track_peak?: number | null;
+  replaygain_album_gain?: number | null;
+  replaygain_album_peak?: number | null;
 };
 
 export type PlaybackState = {
@@ -19,6 +27,18 @@ export type PlaybackState = {
   position: number;
   duration: number;
   currentTrack?: TrackInfo;
+  equalizer?: {
+    enabled: boolean;
+    bands: number[];
+    preamp: number;
+  };
+  replayGain?: {
+    mode: 'off' | 'track' | 'album';
+    preamp: number;
+    preventClipping: boolean;
+  };
+  gaplessEnabled?: boolean;
+  crossfadeDuration?: number;
 };
 
 export type SonanceAudioModuleEvents = {
@@ -29,6 +49,7 @@ declare class SonanceAudioModule extends NativeModule<SonanceAudioModuleEvents> 
   initializePlayer(): string;
   play(): void;
   pause(): void;
+  stop(): void;
   next(): void;
   previous(): void;
   seek(seconds: number): void;
@@ -36,6 +57,9 @@ declare class SonanceAudioModule extends NativeModule<SonanceAudioModuleEvents> 
   setRepeatMode(mode: 'off' | 'track' | 'queue'): void;
   setEqualizerEnabled(enabled: boolean): void;
   setEqualizerBands(gains: number[], preamp: number): void;
+  setReplayGain(mode: 'off' | 'track' | 'album', preamp: number, preventClipping: boolean): void;
+  setGaplessEnabled(enabled: boolean): void;
+  setCrossfadeDuration(duration: number): void;
   loadTrack(track: TrackInfo): void;
   setQueue(tracks: TrackInfo[], startIndex: number): void;
   addToQueue(track: TrackInfo): void;
@@ -46,6 +70,10 @@ declare class SonanceAudioModule extends NativeModule<SonanceAudioModuleEvents> 
     album?: string;
     duration?: number;
     artworkBase64?: string;
+    replayGainTrack?: number;
+    replayGainAlbum?: number;
+    replayGainTrackPeak?: number;
+    replayGainAlbumPeak?: number;
   }>;
 }
 
@@ -63,6 +91,13 @@ class ExpoGoAudioEngine {
   private duration: number = 0;
   private currentTime: number = 0;
   private lastIntentTime: number = 0;
+
+  // ReplayGain & Playback Pipeline Settings
+  private replayGainMode: 'off' | 'track' | 'album' = 'off';
+  private replayGainPreamp: number = 0;
+  private replayGainPreventClipping: boolean = true;
+  private gaplessEnabled: boolean = true;
+  private crossfadeDuration: number = 0;
 
   private emitState() {
     const currentTrack = this.currentIndex >= 0 && this.currentIndex < this.queue.length 
@@ -87,6 +122,13 @@ class ExpoGoAudioEngine {
       position: currentPos,
       duration: totalDuration,
       currentTrack,
+      replayGain: {
+        mode: this.replayGainMode,
+        preamp: this.replayGainPreamp,
+        preventClipping: this.replayGainPreventClipping,
+      },
+      gaplessEnabled: this.gaplessEnabled,
+      crossfadeDuration: this.crossfadeDuration,
     };
 
     this.listeners.forEach(listener => {
@@ -188,7 +230,6 @@ class ExpoGoAudioEngine {
 
         if (status.duration && status.duration > 0) {
           this.duration = status.duration;
-          // Self-heal SQLite database with accurate hardware duration
           if (track.id && (!track.duration || track.duration === 0)) {
             updateTrackDuration(track.id, status.duration);
           }
@@ -197,14 +238,13 @@ class ExpoGoAudioEngine {
           this.currentTime = status.currentTime;
         }
         
-        // Auto-play buffer recovery for large/long 30-min files
+        // Auto-play buffer recovery for large/long files
         if (autoPlay && this.isPlaying && !status.playing && (Date.now() - this.lastIntentTime < 4000)) {
           try {
             newPlayer.play();
           } catch (e) {}
         }
 
-        // Guard against lagging asynchronous status updates overriding deliberate user play/pause
         const timeSinceIntent = Date.now() - this.lastIntentTime;
         if (timeSinceIntent > 600) {
           this.isPlaying = status.playing;
@@ -260,6 +300,23 @@ class ExpoGoAudioEngine {
         console.warn("Error calling player.pause():", e);
       }
     }
+  }
+
+  public stop() {
+    this.isPlaying = false;
+    this.currentIndex = -1;
+    this.queue = [];
+    this.duration = 0;
+    this.currentTime = 0;
+    this.lastIntentTime = Date.now();
+    if (this.player) {
+      try {
+        this.player.pause();
+        this.player.release();
+      } catch (e) {}
+      this.player = null;
+    }
+    this.emitState();
   }
 
   public next() {
@@ -330,12 +387,27 @@ class ExpoGoAudioEngine {
   }
 
   public setEqualizerEnabled(enabled: boolean) {
-    // Equalizer state updated in JS fallback
     this.emitState();
   }
 
   public setEqualizerBands(gains: number[], preamp: number) {
-    // Equalizer gains updated in JS fallback
+    this.emitState();
+  }
+
+  public setReplayGain(mode: 'off' | 'track' | 'album', preamp: number, preventClipping: boolean) {
+    this.replayGainMode = mode;
+    this.replayGainPreamp = preamp;
+    this.replayGainPreventClipping = preventClipping;
+    this.emitState();
+  }
+
+  public setGaplessEnabled(enabled: boolean) {
+    this.gaplessEnabled = enabled;
+    this.emitState();
+  }
+
+  public setCrossfadeDuration(duration: number) {
+    this.crossfadeDuration = duration;
     this.emitState();
   }
 
@@ -374,10 +446,6 @@ class ExpoGoAudioEngine {
         }
 
         timeoutId = setTimeout(() => {
-          // `release()` invalidates Expo SharedObjects.  Do not read a player
-          // property from this delayed callback: a prior status update may have
-          // completed and released this probe while the callback was queued.
-          // The status event is the authoritative source for a loaded duration.
           finish(0);
         }, 1200);
       });
@@ -428,3 +496,4 @@ try {
 }
 
 export default SonanceAudioModuleProxy;
+

@@ -1,9 +1,23 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, Animated, LayoutChangeEvent } from 'react-native';
-import { BlurView } from 'expo-blur';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors, radii, spacing } from '../theme';
-import { triggerSelection } from '../utils/haptics';
+import React, { useEffect, useState } from "react";
+import {
+  View,
+  StyleSheet,
+  TouchableOpacity,
+  LayoutChangeEvent,
+} from "react-native";
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  interpolate,
+  Extrapolation,
+  interpolateColor,
+} from "react-native-reanimated";
+import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { colors } from "../theme";
+import { triggerSelection } from "../utils/haptics";
 
 export function GlassTabBar({ state, descriptors, navigation }: any) {
   const insets = useSafeAreaInsets();
@@ -12,45 +26,64 @@ export function GlassTabBar({ state, descriptors, navigation }: any) {
   const routeCount = state.routes.length;
   const tabWidth = containerWidth > 0 ? containerWidth / routeCount : 0;
 
-  const slideAnim = useRef(new Animated.Value(state.index)).current;
+  // Reanimated shared value for the physical position of the sliding lens
+  const slidePosition = useSharedValue(0);
 
   useEffect(() => {
-    Animated.spring(slideAnim, {
-      toValue: state.index,
-      damping: 22,
-      stiffness: 240,
-      mass: 0.8,
-      useNativeDriver: true,
-    }).start();
-  }, [state.index]);
+    if (tabWidth > 0) {
+      // Apple-tuned spring physics: snappy, slight overshoot, physical mass
+      slidePosition.value = withSpring(state.index * tabWidth, {
+        mass: 0.6,
+        damping: 18,
+        stiffness: 220,
+      });
+    }
+  }, [state.index, tabWidth]);
 
   const onLayoutContent = (e: LayoutChangeEvent) => {
     const w = e.nativeEvent.layout.width;
     if (w > 0) setContainerWidth(w);
   };
 
-  const translateX = tabWidth > 0 ? slideAnim.interpolate({
-    inputRange: state.routes.map((_: any, i: number) => i),
-    outputRange: state.routes.map((_: any, i: number) => i * tabWidth),
-  }) : 0;
+  const animatedCapsuleStyle = useAnimatedStyle(() => {
+    return {
+      transform: [{ translateX: slidePosition.value }],
+    };
+  });
 
   return (
-    <View style={[styles.outerContainer, { bottom: Math.max(insets.bottom, 12) }]}>
-      <BlurView intensity={90} tint="light" style={styles.blurCapsule}>
+    <View
+      style={[styles.outerContainer, { bottom: Math.max(insets.bottom, 12) }]}
+    >
+      {/*
+        High-intensity blur with a highly transparent background.
+        This forces the background content to do the visual work, creating true frosted glass.
+      */}
+      <BlurView intensity={75} tint="light" style={styles.blurCapsule}>
         <View style={styles.content} onLayout={onLayoutContent}>
-          {/* Animated Sliding Liquid Glass Capsule */}
+          {/* Animated Sliding Liquid Glass Lens */}
           {tabWidth > 0 && (
             <Animated.View
               style={[
                 styles.slidingCapsuleTrack,
-                {
-                  width: tabWidth,
-                  transform: [{ translateX }],
-                },
+                { width: tabWidth },
+                animatedCapsuleStyle,
               ]}
               pointerEvents="none"
             >
-              <View style={styles.liquidCapsulePill} />
+              <View style={styles.liquidCapsulePill}>
+                {/* 3D Specular Sheen for the sliding lens */}
+                <LinearGradient
+                  colors={[
+                    "rgba(255, 255, 255, 0.95)",
+                    "rgba(255, 255, 255, 0.4)",
+                    "rgba(255, 255, 255, 0.8)",
+                  ]}
+                  style={StyleSheet.absoluteFill}
+                  start={{ x: 0.2, y: 0 }}
+                  end={{ x: 0.8, y: 1 }}
+                />
+              </View>
             </Animated.View>
           )}
 
@@ -61,7 +94,7 @@ export function GlassTabBar({ state, descriptors, navigation }: any) {
             const onPress = () => {
               triggerSelection();
               const event = navigation.emit({
-                type: 'tabPress',
+                type: "tabPress",
                 target: route.key,
                 canPreventDefault: true,
               });
@@ -73,23 +106,60 @@ export function GlassTabBar({ state, descriptors, navigation }: any) {
 
             const Icon = options.tabBarIcon;
 
+            // Tie icon animations physically to the sliding lens position
+            const animatedIconStyle = useAnimatedStyle(() => {
+              if (tabWidth === 0) return { transform: [{ scale: 1 }] };
+
+              // The exact center position of this specific tab
+              const tabCenterPos = index * tabWidth;
+
+              // Magnify the icon as the lens passes over it (Liquid Magnification)
+              const scale = interpolate(
+                slidePosition.value,
+                [
+                  tabCenterPos - tabWidth,
+                  tabCenterPos,
+                  tabCenterPos + tabWidth,
+                ],
+                [0.85, 1.15, 0.85],
+                Extrapolation.CLAMP,
+              );
+
+              // Fluid color transition matching the lens position
+              const color = interpolateColor(
+                slidePosition.value,
+                [
+                  tabCenterPos - tabWidth,
+                  tabCenterPos,
+                  tabCenterPos + tabWidth,
+                ],
+                ["#94A3B8", colors.tint || "#0284C7", "#94A3B8"],
+              );
+
+              return {
+                transform: [{ scale }],
+                // Note: We use a tintColor or pass it down via an animatable wrapper.
+                // For direct SVG icon colors, we'll handle it below via Reanimated.
+              };
+            });
+
             return (
               <TouchableOpacity
                 key={route.key}
                 accessibilityRole="button"
                 accessibilityState={isFocused ? { selected: true } : {}}
-                accessibilityLabel={options.tabBarAccessibilityLabel}
                 onPress={onPress}
                 style={styles.tabItem}
-                activeOpacity={0.7}
+                activeOpacity={1} // Disable default opacity flash for a cleaner look
               >
-                <View style={styles.iconWrapper}>
-                  {Icon && Icon({ 
-                    focused: isFocused, 
-                    color: isFocused ? colors.tint : '#94A3B8',
-                    size: 22 
-                  })}
-                </View>
+                <Animated.View style={[styles.iconWrapper, animatedIconStyle]}>
+                  {Icon &&
+                    Icon({
+                      focused: isFocused,
+                      color: isFocused ? colors.tint || "#0284C7" : "#94A3B8",
+                      size: 24, // Slightly larger base size for the scale down effect
+                    })}
+                </Animated.View>
               </TouchableOpacity>
             );
           })}
@@ -101,60 +171,70 @@ export function GlassTabBar({ state, descriptors, navigation }: any) {
 
 const styles = StyleSheet.create({
   outerContainer: {
-    position: 'absolute',
+    position: "absolute",
     left: 24,
     right: 24,
-    alignItems: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.08,
-    shadowRadius: 20,
+    alignItems: "center",
+
+    // Ambient Occlusion Shadow (Soft, deeply spread)
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 12 },
+    shadowOpacity: 0.06,
+    shadowRadius: 24,
     elevation: 8,
   },
   blurCapsule: {
-    width: '100%',
+    width: "100%",
     borderRadius: 36,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255, 255, 255, 0.75)',
-    borderWidth: 1.2,
-    borderColor: 'rgba(255, 255, 255, 0.9)',
+    overflow: "hidden",
+    backgroundColor: "rgba(255, 255, 255, 0.3)", // Highly transparent for maximum frost
+
+    // Pure glass edge reflections
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.9)",
+    borderBottomColor: "rgba(255, 255, 255, 0.4)", // Dimmer bottom edge for 3D lighting
   },
   content: {
-    flexDirection: 'row',
-    height: 62,
-    alignItems: 'center',
-    position: 'relative',
+    flexDirection: "row",
+    height: 64, // Slightly taller for breathing room
+    alignItems: "center",
+    position: "relative",
   },
   slidingCapsuleTrack: {
-    position: 'absolute',
+    position: "absolute",
     top: 0,
     bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
+    justifyContent: "center",
+    alignItems: "center",
     zIndex: 0,
   },
   liquidCapsulePill: {
-    width: 56,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
-    borderWidth: 1.2,
-    borderColor: 'rgba(255, 255, 255, 1)',
-    shadowColor: '#000',
+    width: 52,
+    height: 40,
+    borderRadius: 20,
+    overflow: "hidden",
+
+    // Specular glass borders
+    borderWidth: 1.5,
+    borderColor: "rgba(255, 255, 255, 1)",
+    borderBottomWidth: 0.5,
+
+    // Refraction drop-shadow (bends light away from the pill)
+    shadowColor: "#000",
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.08,
-    shadowRadius: 8,
+    shadowRadius: 6,
     elevation: 3,
   },
   tabItem: {
     flex: 1,
-    height: '100%',
-    alignItems: 'center',
-    justifyContent: 'center',
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
     zIndex: 1,
   },
   iconWrapper: {
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

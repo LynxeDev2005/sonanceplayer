@@ -12,6 +12,10 @@ export function pause(): void {
   SonanceAudioModule.pause();
 }
 
+export function stop(): void {
+  SonanceAudioModule.stop();
+}
+
 export function next(): void {
   SonanceAudioModule.next();
 }
@@ -45,6 +49,30 @@ export function setEqualizerBands(gains: number[], preamp: number): void {
     SonanceAudioModule.setEqualizerBands(gains, preamp);
   } catch (e) {
     console.warn("setEqualizerBands error:", e);
+  }
+}
+
+export function setReplayGain(mode: 'off' | 'track' | 'album', preamp: number, preventClipping: boolean): void {
+  try {
+    SonanceAudioModule.setReplayGain(mode, preamp, preventClipping);
+  } catch (e) {
+    console.warn("setReplayGain error:", e);
+  }
+}
+
+export function setGaplessEnabled(enabled: boolean): void {
+  try {
+    SonanceAudioModule.setGaplessEnabled(enabled);
+  } catch (e) {
+    console.warn("setGaplessEnabled error:", e);
+  }
+}
+
+export function setCrossfadeDuration(duration: number): void {
+  try {
+    SonanceAudioModule.setCrossfadeDuration(duration);
+  } catch (e) {
+    console.warn("setCrossfadeDuration error:", e);
   }
 }
 
@@ -82,6 +110,10 @@ export type ExtractedMetadata = {
   album?: string;
   duration?: number;
   artworkBase64?: string;
+  replayGainTrack?: number;
+  replayGainAlbum?: number;
+  replayGainTrackPeak?: number;
+  replayGainAlbumPeak?: number;
 };
 
 export async function extractMetadata(filePath: string): Promise<ExtractedMetadata> {
@@ -93,3 +125,4 @@ export function addPlaybackListener(listener: (state: PlaybackState) => void) {
 }
 
 export { TrackInfo, PlaybackState };
+
