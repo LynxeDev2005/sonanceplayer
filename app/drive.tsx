@@ -23,6 +23,7 @@ import {
   GOOGLE_DRIVE_SCOPES,
   BUILTIN_GOOGLE_CLIENT_ID,
 } from '../src/services/GoogleDriveService';
+import { PlayerController } from '../src/player/PlayerController';
 import { triggerSuccess, triggerLightImpact, triggerError } from '../src/utils/haptics';
 
 // Google OAuth Discovery endpoints
@@ -37,7 +38,13 @@ export default function GoogleDriveScreen() {
   const [clientId, setClientId] = useState(BUILTIN_GOOGLE_CLIENT_ID);
   const [user, setUser] = useState<DriveUser | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isRestoringSession, setIsRestoringSession] = useState(true);
   const [showSetupGuide, setShowSetupGuide] = useState(false);
+
+  // Streaming & Download states
+  const [playingFileId, setPlayingFileId] = useState<string | null>(null);
+  const [downloadingFileIds, setDownloadingFileIds] = useState<Set<string>>(new Set());
+  const [downloadedFileNames, setDownloadedFileNames] = useState<Set<string>>(new Set());
 
   // Folder navigation state
   const [currentFolder, setCurrentFolder] = useState<{ id: string; name: string }>({
@@ -72,6 +79,36 @@ export default function GoogleDriveScreen() {
     discovery
   );
 
+  // Restore cached session on mount
+  useEffect(() => {
+    (async () => {
+      try {
+        const cached = await GoogleDriveService.loadCachedSession();
+        if (cached.accessToken && cached.user) {
+          setUser(cached.user);
+          setClientId(cached.clientId);
+          setClientIdInput(cached.clientId);
+          loadFolderFiles('root', 'My Drive');
+        }
+      } catch (e) {
+        console.warn('Session restore error:', e);
+      } finally {
+        setIsRestoringSession(false);
+      }
+    })();
+  }, []);
+
+  // Listen to Player state
+  useEffect(() => {
+    return PlayerController.subscribe((state) => {
+      if (state.currentTrack?.id && state.isPlaying) {
+        setPlayingFileId(state.currentTrack.id);
+      } else if (!state.isPlaying) {
+        setPlayingFileId(null);
+      }
+    });
+  }, []);
+
   useEffect(() => {
     if (response?.type === 'success') {
       if (response.params.code) {
@@ -101,7 +138,7 @@ export default function GoogleDriveScreen() {
     setIsLoading(true);
     try {
       const profile = await GoogleDriveService.fetchUserProfile(token);
-      GoogleDriveService.setSession(token, profile);
+      await GoogleDriveService.setSession(token, profile, clientId);
       setUser(profile);
       triggerSuccess();
       loadFolderFiles('root', 'My Drive');
@@ -117,7 +154,7 @@ export default function GoogleDriveScreen() {
     if (!clientId.trim()) {
       Alert.alert(
         'Client ID Required',
-        'Please enter your Google Cloud iOS Client ID below. Follow the setup guide to restrict access exclusively to your email.'
+        'Please enter your Google Cloud iOS Client ID below.'
       );
       return;
     }
@@ -129,9 +166,9 @@ export default function GoogleDriveScreen() {
     }
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
     triggerLightImpact();
-    GoogleDriveService.signOut();
+    await GoogleDriveService.signOut();
     setUser(null);
     setFiles([]);
     setSelectedFileIds(new Set());
@@ -188,6 +225,50 @@ export default function GoogleDriveScreen() {
       setSelectedFileIds(new Set());
     } else {
       setSelectedFileIds(new Set(audioFiles.map((f) => f.id)));
+    }
+  };
+
+  // Play / Stream online
+  const handleStreamPlay = (file: DriveFile) => {
+    triggerLightImpact();
+    const cleanName = file.name.replace(/\.[^/.]+$/, '');
+    const streamUrl = GoogleDriveService.getStreamUrl(file.id);
+
+    if (playingFileId === file.id) {
+      PlayerController.togglePlayPause();
+      return;
+    }
+
+    PlayerController.loadTrack({
+      id: file.id,
+      title: cleanName,
+      artist: 'Google Drive Stream',
+      filePath: streamUrl,
+      duration: 0,
+    });
+    setPlayingFileId(file.id);
+  };
+
+  // Download single track to offline library
+  const handleSingleDownload = async (file: DriveFile) => {
+    if (downloadingFileIds.has(file.id)) return;
+    triggerLightImpact();
+    setDownloadingFileIds((prev) => new Set(prev).add(file.id));
+
+    try {
+      await GoogleDriveService.downloadSingleTrack(file);
+      triggerSuccess();
+      setDownloadedFileNames((prev) => new Set(prev).add(file.name.toLowerCase()));
+      Alert.alert('Downloaded', `"${file.name}" saved to your offline library!`);
+    } catch (e: any) {
+      triggerError();
+      Alert.alert('Download Failed', e.message || 'Could not download track.');
+    } finally {
+      setDownloadingFileIds((prev) => {
+        const next = new Set(prev);
+        next.delete(file.id);
+        return next;
+      });
     }
   };
 
@@ -277,7 +358,12 @@ export default function GoogleDriveScreen() {
       </View>
 
       {/* Main Content */}
-      {!user ? (
+      {isRestoringSession ? (
+        <View style={styles.centerLoading}>
+          <ActivityIndicator size="large" color={colors.tint} />
+          <Text style={styles.loadingText}>Restoring Google Drive session...</Text>
+        </View>
+      ) : !user ? (
         <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
           {/* Welcome Card */}
           <View style={styles.authCard}>
@@ -286,8 +372,7 @@ export default function GoogleDriveScreen() {
             </View>
             <Text style={styles.authCardTitle}>Connect Your Google Drive</Text>
             <Text style={styles.authCardSubtitle}>
-              Stream and import your personal music files directly into your offline library with
-              multi-threaded downloading and duplicate protection.
+              Stream your music online or download tracks offline directly into your audiophile library.
             </Text>
 
             {/* Client ID Configuration Input */}
@@ -477,16 +562,15 @@ export default function GoogleDriveScreen() {
                 }
 
                 const isSelected = selectedFileIds.has(item.id);
+                const isPlayingThis = playingFileId === item.id;
+                const isDownloadingThis = downloadingFileIds.has(item.id);
+                const isOffline = downloadedFileNames.has(item.name.toLowerCase()) || GoogleDriveService.isTrackInLibrary(item.name);
                 const sizeMb = item.size
                   ? (parseInt(item.size, 10) / (1024 * 1024)).toFixed(1) + ' MB'
                   : '';
 
                 return (
-                  <TouchableOpacity
-                    style={[styles.fileRow, isSelected && styles.fileRowSelected]}
-                    onPress={() => toggleSelectFile(item.id)}
-                    activeOpacity={0.7}
-                  >
+                  <View style={[styles.fileRow, isSelected && styles.fileRowSelected, isPlayingThis && styles.fileRowPlaying]}>
                     <TouchableOpacity
                       onPress={() => toggleSelectFile(item.id)}
                       style={styles.checkboxTouch}
@@ -497,16 +581,73 @@ export default function GoogleDriveScreen() {
                         color={isSelected ? colors.tint : colors.textSecondary}
                       />
                     </TouchableOpacity>
-                    <View style={styles.fileIcon}>
-                      <Ionicons name="musical-note" size={20} color={colors.tint} />
+
+                    <TouchableOpacity
+                      style={styles.fileDetailsTouch}
+                      onPress={() => handleStreamPlay(item)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={[styles.fileIcon, isPlayingThis && styles.fileIconPlaying]}>
+                        <Ionicons
+                          name={isPlayingThis ? "volume-high" : "musical-note"}
+                          size={20}
+                          color={isPlayingThis ? colors.white : colors.tint}
+                        />
+                      </View>
+                      <View style={styles.fileDetails}>
+                        <Text style={[styles.fileName, isPlayingThis && styles.fileNamePlaying]} numberOfLines={1}>
+                          {item.name}
+                        </Text>
+                        <View style={styles.fileMetaRow}>
+                          <Text style={styles.fileMeta}>{sizeMb || 'Audio'}</Text>
+                          {isOffline ? (
+                            <View style={styles.badgeOffline}>
+                              <Ionicons name="checkmark-circle" size={11} color="#10B981" />
+                              <Text style={styles.badgeOfflineText}>Offline</Text>
+                            </View>
+                          ) : (
+                            <View style={styles.badgeCloud}>
+                              <Ionicons name="cloud-outline" size={11} color="#3B82F6" />
+                              <Text style={styles.badgeCloudText}>Cloud</Text>
+                            </View>
+                          )}
+                        </View>
+                      </View>
+                    </TouchableOpacity>
+
+                    {/* Dual Action Buttons (Play Online / Download Offline) */}
+                    <View style={styles.rowActions}>
+                      <TouchableOpacity
+                        style={[styles.streamBtn, isPlayingThis && styles.streamBtnActive]}
+                        onPress={() => handleStreamPlay(item)}
+                        activeOpacity={0.7}
+                      >
+                        <Ionicons
+                          name={isPlayingThis ? "pause" : "play"}
+                          size={16}
+                          color={isPlayingThis ? colors.white : colors.tint}
+                        />
+                      </TouchableOpacity>
+
+                      {isOffline ? (
+                        <View style={styles.downloadDoneBtn}>
+                          <Ionicons name="cloud-done" size={20} color="#10B981" />
+                        </View>
+                      ) : isDownloadingThis ? (
+                        <View style={styles.downloadLoadingBtn}>
+                          <ActivityIndicator size="small" color={colors.tint} />
+                        </View>
+                      ) : (
+                        <TouchableOpacity
+                          style={styles.downloadBtn}
+                          onPress={() => handleSingleDownload(item)}
+                          activeOpacity={0.7}
+                        >
+                          <Ionicons name="cloud-download-outline" size={20} color={colors.tint} />
+                        </TouchableOpacity>
+                      )}
                     </View>
-                    <View style={styles.fileDetails}>
-                      <Text style={styles.fileName} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      <Text style={styles.fileMeta}>{sizeMb || 'Audio File'}</Text>
-                    </View>
-                  </TouchableOpacity>
+                  </View>
                 );
               }}
             />
@@ -859,9 +1000,20 @@ const styles = StyleSheet.create({
   fileRowSelected: {
     backgroundColor: 'rgba(59, 130, 246, 0.05)',
   },
+  fileRowPlaying: {
+    backgroundColor: 'rgba(59, 130, 246, 0.08)',
+    borderLeftWidth: 3,
+    borderLeftColor: colors.tint,
+  },
   checkboxTouch: {
     padding: 4,
     marginRight: 6,
+  },
+  fileDetailsTouch: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8,
   },
   fileIcon: {
     width: 36,
@@ -872,6 +1024,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: spacing.md,
   },
+  fileIconPlaying: {
+    backgroundColor: colors.tint,
+  },
   fileDetails: {
     flex: 1,
   },
@@ -879,11 +1034,86 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.sm,
     fontWeight: typography.weights.medium,
     color: colors.text,
-    marginBottom: 2,
+    marginBottom: 3,
+  },
+  fileNamePlaying: {
+    color: colors.tint,
+    fontWeight: typography.weights.bold,
+  },
+  fileMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   fileMeta: {
     fontSize: typography.sizes.xs,
     color: colors.textSecondary,
+    marginRight: 8,
+  },
+  badgeOffline: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  badgeOfflineText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#10B981',
+    marginLeft: 3,
+  },
+  badgeCloud: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    paddingHorizontal: 6,
+    paddingVertical: 1.5,
+    borderRadius: 6,
+  },
+  badgeCloudText: {
+    fontSize: 10,
+    fontWeight: '600',
+    color: '#3B82F6',
+    marginLeft: 3,
+  },
+  rowActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  streamBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  streamBtnActive: {
+    backgroundColor: colors.tint,
+  },
+  downloadBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(0,0,0,0.04)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  downloadDoneBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  downloadLoadingBtn: {
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   centerLoading: {
     flex: 1,

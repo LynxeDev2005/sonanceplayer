@@ -40,9 +40,15 @@ export interface DriveImportProgress {
   isDuplicate?: boolean;
 }
 
-const SETTINGS_KEY_CLIENT_ID = 'sonance_gdrive_client_id';
-const SETTINGS_KEY_ACCESS_TOKEN = 'sonance_gdrive_access_token';
-const SETTINGS_KEY_USER = 'sonance_gdrive_user';
+interface CachedSession {
+  clientId: string;
+  clientSecret?: string;
+  accessToken: string;
+  user: DriveUser | null;
+  savedAt: number;
+}
+
+const SESSION_FILE = (FileSystem.documentDirectory || 'file:///tmp/') + 'gdrive_session.json';
 
 class GoogleDriveServiceClass {
   private customClientId: string = BUILTIN_GOOGLE_CLIENT_ID;
@@ -54,12 +60,68 @@ class GoogleDriveServiceClass {
     this.loadCachedSession();
   }
 
-  private async loadCachedSession() {
-    // Session state initialized
+  /**
+   * Loads persisted Google Drive session from local storage
+   */
+  public async loadCachedSession(): Promise<{ accessToken: string | null; user: DriveUser | null; clientId: string }> {
+    try {
+      const info = await FileSystem.getInfoAsync(SESSION_FILE);
+      if (info.exists) {
+        const content = await FileSystem.readAsStringAsync(SESSION_FILE);
+        const data: CachedSession = JSON.parse(content);
+        if (data && data.accessToken) {
+          this.accessToken = data.accessToken;
+          this.currentUser = data.user;
+          if (data.clientId) {
+            this.customClientId = data.clientId;
+          }
+          if (data.clientSecret) {
+            this.customClientSecret = data.clientSecret;
+          }
+          return { accessToken: this.accessToken, user: this.currentUser, clientId: this.customClientId };
+        }
+      }
+    } catch (e) {
+      console.warn('Failed to load cached Google Drive session:', e);
+    }
+    return { accessToken: null, user: null, clientId: this.customClientId };
+  }
+
+  /**
+   * Saves current Google Drive session to persistent local file
+   */
+  public async saveSessionToStorage() {
+    try {
+      const sessionData: CachedSession = {
+        clientId: this.customClientId,
+        clientSecret: this.customClientSecret,
+        accessToken: this.accessToken || '',
+        user: this.currentUser,
+        savedAt: Date.now(),
+      };
+      await FileSystem.writeAsStringAsync(SESSION_FILE, JSON.stringify(sessionData));
+    } catch (e) {
+      console.warn('Failed to save Google Drive session:', e);
+    }
+  }
+
+  /**
+   * Clears saved session from persistent local file
+   */
+  public async clearCachedSession() {
+    try {
+      const info = await FileSystem.getInfoAsync(SESSION_FILE);
+      if (info.exists) {
+        await FileSystem.deleteAsync(SESSION_FILE);
+      }
+    } catch (e) {
+      console.warn('Failed to delete Google Drive session:', e);
+    }
   }
 
   public setCustomClientId(clientId: string) {
     this.customClientId = clientId.trim() || BUILTIN_GOOGLE_CLIENT_ID;
+    this.saveSessionToStorage();
   }
 
   public getCustomClientId(): string {
@@ -68,6 +130,7 @@ class GoogleDriveServiceClass {
 
   public setCustomClientSecret(secret: string) {
     this.customClientSecret = secret.trim();
+    this.saveSessionToStorage();
   }
 
   public getCustomClientSecret(): string {
@@ -86,14 +149,19 @@ class GoogleDriveServiceClass {
     return this.accessToken;
   }
 
-  public setSession(token: string, user: DriveUser | null) {
+  public async setSession(token: string, user: DriveUser | null, clientId?: string) {
     this.accessToken = token;
     this.currentUser = user;
+    if (clientId) {
+      this.customClientId = clientId;
+    }
+    await this.saveSessionToStorage();
   }
 
-  public signOut() {
+  public async signOut() {
     this.accessToken = null;
     this.currentUser = null;
+    await this.clearCachedSession();
   }
 
   /**
@@ -109,6 +177,16 @@ class GoogleDriveServiceClass {
       scheme: 'sonance',
       path: 'oauthredirect',
     });
+  }
+
+  /**
+   * Direct streaming media URL for online AVPlayer streaming
+   */
+  public getStreamUrl(fileId: string): string {
+    if (!this.accessToken) {
+      return `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media`;
+    }
+    return `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&access_token=${encodeURIComponent(this.accessToken)}`;
   }
 
   /**
@@ -223,8 +301,101 @@ class GoogleDriveServiceClass {
   /**
    * Normalizes title for duplicate matching
    */
-  private normalizeString(str: string): string {
+  public normalizeString(str: string): string {
     return str.toLowerCase().replace(/[^a-z0-9]/g, '').trim();
+  }
+
+  /**
+   * Checks if a file is already downloaded into the local library
+   */
+  public isTrackInLibrary(fileName: string, title?: string): boolean {
+    try {
+      const tracks = getAllTracks();
+      const safeName = fileName.replace(/[/\\?%*:|"<>]/g, '_').toLowerCase();
+      const normalizedTitle = this.normalizeString(title || fileName.replace(/\.[^/.]+$/, ''));
+
+      for (const t of tracks) {
+        const localName = (t.file_path.split('/').pop()?.split('\\').pop() || '').toLowerCase();
+        if (localName === safeName) return true;
+        if (normalizedTitle.length > 2 && this.normalizeString(t.title) === normalizedTitle) return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+
+  /**
+   * Downloads and imports a single Google Drive track directly to local storage & SQLite
+   */
+  public async downloadSingleTrack(file: DriveFile): Promise<DBTrack> {
+    if (!this.accessToken) {
+      throw new Error('Not authenticated with Google Drive.');
+    }
+    await initStorage();
+
+    const safeName = file.name.replace(/[/\\?%*:|"<>]/g, '_');
+    const cleanFileName = file.name.replace(/\.[^/.]+$/, '');
+    const localDestPath = TRACKS_DIR + safeName;
+
+    const downloadUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
+    
+    const downloadResult = await FileSystem.downloadAsync(
+      downloadUrl,
+      localDestPath,
+      {
+        headers: {
+          Authorization: `Bearer ${this.accessToken}`,
+        },
+      }
+    );
+
+    if (downloadResult.status !== 200) {
+      throw new Error(`Failed to download ${file.name}, HTTP status: ${downloadResult.status}`);
+    }
+
+    const fallbackMeta = {
+      title: undefined,
+      artist: undefined,
+      album: undefined,
+      duration: 0,
+      artworkBase64: undefined,
+    };
+
+    const metadata = await extractMetadata(localDestPath).catch(() => fallbackMeta);
+    const trackId = Crypto.randomUUID();
+    let artworkPath: string | null = null;
+
+    if (metadata.artworkBase64) {
+      try {
+        artworkPath = await saveArtwork(metadata.artworkBase64, trackId);
+      } catch (e) {}
+    }
+
+    let title = metadata.title;
+    let artist = metadata.artist;
+
+    if (!title || title.toLowerCase() === 'unknown') {
+      if (cleanFileName.includes(' - ')) {
+        const parts = cleanFileName.split(' - ');
+        artist = !artist || artist.toLowerCase().includes('unknown') ? parts[0].trim() : artist;
+        title = parts.slice(1).join(' - ').trim();
+      } else {
+        title = cleanFileName;
+      }
+    }
+
+    const dbTrack: DBTrack = {
+      id: trackId,
+      title: title || cleanFileName || 'Drive Audio',
+      artist: artist || 'Unknown Artist',
+      album: metadata.album || 'Google Drive',
+      duration: metadata.duration || 0,
+      file_path: localDestPath,
+      artwork_path: artworkPath,
+      added_at: Date.now(),
+    };
+
+    insertTracksBatch([dbTrack]);
+    return dbTrack;
   }
 
   /**
