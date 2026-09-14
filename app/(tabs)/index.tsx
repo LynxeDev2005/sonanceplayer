@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList, ListRenderItemInfo } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList, ListRenderItemInfo, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, radii } from '../../src/theme';
@@ -50,7 +50,10 @@ export default function LibraryScreen() {
     <View style={styles.headerContainer}>
       {/* Title & Action Buttons */}
       <View style={styles.titleRow}>
-        <Text style={styles.largeTitle}>Library</Text>
+        <Image 
+          source={require('../../assets/sonance-logo-black.png')} 
+          style={{ width: 145, height: 34, resizeMode: 'contain' }} 
+        />
         <View style={styles.actionButtons}>
           <TouchableOpacity 
             style={styles.iconCircleButton}

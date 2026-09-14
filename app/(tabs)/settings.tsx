@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Switch, Image } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { colors, typography, spacing, radii } from '../../src/theme';
@@ -264,6 +264,18 @@ export default function SettingsScreen() {
         {/* Section: About */}
         <Text style={styles.sectionHeader}>ABOUT</Text>
         <View style={styles.card}>
+          <View style={{ alignItems: 'center', paddingVertical: spacing.md }}>
+            <Image 
+              source={require('../../assets/sonance-logo-black.png')} 
+              style={{ width: 150, height: 35, resizeMode: 'contain', marginBottom: 6 }} 
+            />
+            <Text style={{ fontSize: typography.sizes.xs, color: colors.textSecondary, fontWeight: '500' }}>
+              Audiophile Music Player
+            </Text>
+          </View>
+
+          <View style={styles.divider} />
+
           <View style={styles.row}>
             <Text style={styles.rowLabel}>App Version</Text>
             <Text style={styles.rowValue}>1.0.0</Text>

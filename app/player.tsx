@@ -283,10 +283,13 @@ export default function PlayerScreen() {
                   <Image source={{ uri: currentTrack.artworkUrl }} style={styles.artworkImage} />
                 ) : (
                   <LinearGradient 
-                    colors={['#E2E8F0', '#CBD5E1']} 
+                    colors={['#1E293B', '#0F172A']} 
                     style={styles.artworkPlaceholder}
                   >
-                    <Ionicons name="musical-notes" size={90} color={colors.textSecondary} />
+                    <Image 
+                      source={require('../assets/sonance-logo-white.png')} 
+                      style={{ width: 175, height: 45, resizeMode: 'contain' }} 
+                    />
                   </LinearGradient>
                 )}
               </View>
