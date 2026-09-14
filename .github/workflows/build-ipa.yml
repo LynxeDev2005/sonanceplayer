@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     name: Build sideloadable IPA
-    runs-on: macos-15
+    runs-on: macos-16
 
     steps:
       - name: Check out source
