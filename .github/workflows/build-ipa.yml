@@ -1,0 +1,75 @@
+name: Build unsigned iOS IPA
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build sideloadable IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install JavaScript dependencies
+        run: npm ci
+
+      - name: Generate the iOS project
+        run: npx expo prebuild --platform ios --non-interactive --no-install
+
+      - name: Install CocoaPods dependencies
+        run: pod install --project-directory=ios
+
+      - name: Build without Apple signing assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          workspace="$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)"
+          test -n "$workspace"
+          scheme="$(xcodebuild -list -workspace "$workspace" | awk '/Schemes:/{found=1; next} found && NF {gsub(/^[[:space:]]+/, ""); print; exit}')"
+          test -n "$scheme"
+
+          xcodebuild build \
+            -workspace "$workspace" \
+            -scheme "$scheme" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            PROVISIONING_PROFILE_SPECIFIER=""
+
+      - name: Package the unsigned IPA
+        shell: bash
+        run: |
+          set -euo pipefail
+          app_path="$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' -type d -print -quit)"
+          test -n "$app_path"
+
+          rm -rf package
+          mkdir -p package/Payload
+          cp -R "$app_path" package/Payload/
+          (
+            cd package
+            zip -qry ../Sonance-unsigned.ipa Payload
+          )
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sonance-unsigned-ipa
+          path: Sonance-unsigned.ipa
+          retention-days: 14

@@ -4,10 +4,23 @@
     "slug": "player-sonance",
     "version": "1.0.0",
     "orientation": "portrait",
+    "scheme": "sonance",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.jttacalig.playersonance",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIFileSharingEnabled": true,
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "UIBackgroundModes": [
+          "audio"
+        ],
+        "NSAppleMusicUsageDescription": "Sonance needs access to your media library to play and manage your imported music tracks.",
+        "NSDocumentsFolderUsageDescription": "Sonance needs access to your documents to import audio files and playlists.",
+        "NSPhotoLibraryUsageDescription": "Sonance needs access to your photo library to set custom album artwork."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -16,10 +29,29 @@
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
+      "permissions": [
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.READ_MEDIA_AUDIO",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.WAKE_LOCK",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ],
       "predictiveBackGestureEnabled": false
     },
     "web": {
       "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-status-bar",
+      "expo-sqlite"
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "8fb0a7b2-3919-4530-a59b-2d719992e4be"
+      }
     }
   }
 }
