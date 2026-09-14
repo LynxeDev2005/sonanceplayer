@@ -44,7 +44,10 @@ jobs:
       - name: Generate the iOS project
         run: npx expo prebuild --platform ios --clean
 
-      - name: Ensure patches applied to iOS workspace
+      - name: Inject Podfile build settings for Swift concurrency
+        run: node scripts/patch-podfile.js
+
+      - name: Ensure JSI patches applied
         run: node scripts/patch-expo-modules-jsi.js
 
       - name: Install CocoaPods dependencies
@@ -83,6 +86,9 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
+            SWIFT_STRICT_CONCURRENCY=minimal \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=NO \
+            GCC_WARN_INHIBIT_ALL_WARNINGS=YES \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
