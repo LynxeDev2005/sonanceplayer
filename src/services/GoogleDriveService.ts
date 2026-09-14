@@ -8,7 +8,7 @@ import { extractMetadata } from '../../modules/sonance-audio/src';
 
 WebBrowser.maybeCompleteAuthSession();
 
-const BUILTIN_ID_PARTS = ['146606044771', 'nr9953rcpjbv860l4oogjqjrf0glj18i', 'apps.googleusercontent.com'];
+const BUILTIN_ID_PARTS = ['146606044771', 'gf8g6dth3aagjdo8m56ofrqs07k3ifq1', 'apps.googleusercontent.com'];
 export const BUILTIN_GOOGLE_CLIENT_ID = `${BUILTIN_ID_PARTS[0]}-${BUILTIN_ID_PARTS[1]}.${BUILTIN_ID_PARTS[2]}`;
 
 export const GOOGLE_DRIVE_SCOPES = [
