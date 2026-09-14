@@ -11,14 +11,21 @@ permissions:
 jobs:
   build:
     name: Build sideloadable IPA
-    runs-on: macos-16
+    runs-on: macos-15
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Verify Apple build toolchain
+      - name: Select latest Xcode toolchain (Swift 6.2+)
         run: |
+          echo "Available Xcode installations:"
+          ls -d /Applications/Xcode*.app || true
+          LATEST_XCODE=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -n 1)
+          if [ -n "$LATEST_XCODE" ]; then
+            echo "Selecting Xcode: $LATEST_XCODE"
+            sudo xcode-select -s "$LATEST_XCODE/Contents/Developer"
+          fi
           xcodebuild -version
           swift --version
 
