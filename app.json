@@ -30,7 +30,12 @@
       "expo-status-bar",
       "expo-sqlite",
       "expo-web-browser",
-      "expo-updates"
+      [
+        "expo-updates",
+        {
+          "username": "jttacalig"
+        }
+      ]
     ],
     "extra": {
       "router": {},
@@ -42,7 +47,10 @@
       "policy": "appVersion"
     },
     "updates": {
-      "url": "https://u.expo.dev/8fb0a7b2-3919-4530-a59b-2d719992e4be"
+      "url": "https://u.expo.dev/8fb0a7b2-3919-4530-a59b-2d719992e4be",
+      "enabled": true,
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0
     }
   }
 }

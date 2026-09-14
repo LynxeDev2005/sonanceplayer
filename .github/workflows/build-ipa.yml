@@ -61,6 +61,9 @@ jobs:
       - name: Generate the iOS project
         run: npx expo prebuild --platform ios --clean
 
+      - name: Configure Expo.plist for Over-The-Air updates
+        run: node scripts/patch-expo-plist.js
+
       - name: Inject Podfile build settings for Swift concurrency
         run: node scripts/patch-podfile.js
 
