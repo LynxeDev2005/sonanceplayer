@@ -67,6 +67,7 @@ export default function GoogleDriveScreen() {
       scopes: GOOGLE_DRIVE_SCOPES,
       redirectUri,
       responseType: AuthSession.ResponseType.Token,
+      usePKCE: false,
     },
     discovery
   );
