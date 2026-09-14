@@ -66,18 +66,18 @@ export default function GoogleDriveScreen() {
       clientId: clientId || 'YOUR_GOOGLE_CLIENT_ID.apps.googleusercontent.com',
       scopes: GOOGLE_DRIVE_SCOPES,
       redirectUri,
-      responseType: AuthSession.ResponseType.Token,
-      usePKCE: false,
+      responseType: AuthSession.ResponseType.Code,
+      usePKCE: true,
     },
     discovery
   );
 
   useEffect(() => {
     if (response?.type === 'success') {
-      if (response.params.access_token) {
-        handleAuthSuccess(response.params.access_token);
-      } else if (response.params.code) {
+      if (response.params.code) {
         handleAuthCode(response.params.code, request?.codeVerifier);
+      } else if (response.params.access_token) {
+        handleAuthSuccess(response.params.access_token);
       }
     } else if (response?.type === 'error') {
       triggerError();
