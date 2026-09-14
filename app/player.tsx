@@ -239,17 +239,27 @@ export default function PlayerScreen() {
             <Text style={styles.headerTitle}>NOW PLAYING</Text>
           </View>
 
-          <TouchableOpacity 
-            onPress={toggleSleepTimer} 
-            style={[styles.liquidHeaderBtn, sleepTimerActive && styles.liquidActiveHeaderBtn]}
-            activeOpacity={0.7}
-          >
-            <Ionicons 
-              name={sleepTimerActive ? "timer" : "timer-outline"} 
-              size={20} 
-              color={sleepTimerActive ? colors.tint : colors.text} 
-            />
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+            <TouchableOpacity 
+              onPress={() => router.push('/equalizer')} 
+              style={styles.liquidHeaderBtn}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="options-outline" size={20} color={colors.text} />
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              onPress={toggleSleepTimer} 
+              style={[styles.liquidHeaderBtn, sleepTimerActive && styles.liquidActiveHeaderBtn]}
+              activeOpacity={0.7}
+            >
+              <Ionicons 
+                name={sleepTimerActive ? "timer" : "timer-outline"} 
+                size={20} 
+                color={sleepTimerActive ? colors.tint : colors.text} 
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         {sleepTimerActive && (

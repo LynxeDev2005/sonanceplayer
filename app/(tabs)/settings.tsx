@@ -111,22 +111,25 @@ export default function SettingsScreen() {
 
           <View style={styles.divider} />
 
-          <View style={styles.row}>
+          <TouchableOpacity style={styles.row} onPress={() => router.push('/equalizer')} activeOpacity={0.7}>
             <View style={styles.rowLeft}>
               <View style={[styles.iconBox, { backgroundColor: '#0EA5E9' }]}>
                 <Ionicons name="options" size={18} color={colors.white} />
               </View>
               <View>
                 <Text style={styles.rowLabel}>10-Band Equalizer</Text>
-                <Text style={styles.rowHint}>{equalizer.presetName}</Text>
+                <Text style={styles.rowHint}>{equalizer.enabled ? `${equalizer.presetName} (Active)` : 'Bypassed'}</Text>
               </View>
             </View>
-            <Switch
-              value={equalizer.enabled}
-              onValueChange={(enabled) => applyEqualizer({ ...equalizer, enabled })}
-              trackColor={{ true: colors.tint, false: '#CBD5E1' }}
-            />
-          </View>
+            <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+              <Switch
+                value={equalizer.enabled}
+                onValueChange={(enabled) => applyEqualizer({ ...equalizer, enabled })}
+                trackColor={{ true: colors.tint, false: '#CBD5E1' }}
+              />
+              <Ionicons name="chevron-forward" size={18} color={colors.textSecondary} style={{ marginLeft: 8 }} />
+            </View>
+          </TouchableOpacity>
 
           <ScrollView
             horizontal

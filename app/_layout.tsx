@@ -37,6 +37,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="player" options={{ presentation: 'modal', headerShown: false }} />
         <Stack.Screen name="import" options={{ presentation: 'modal', headerShown: false }} />
+        <Stack.Screen name="equalizer" options={{ presentation: 'modal', headerShown: false }} />
       </Stack>
     </GestureHandlerRootView>
   );
