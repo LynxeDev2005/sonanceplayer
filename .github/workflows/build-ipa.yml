@@ -38,8 +38,14 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
+      - name: Apply Swift 6.2+ compatibility patches
+        run: node scripts/patch-expo-modules-jsi.js
+
       - name: Generate the iOS project
         run: npx expo prebuild --platform ios --clean
+
+      - name: Ensure patches applied to iOS workspace
+        run: node scripts/patch-expo-modules-jsi.js
 
       - name: Install CocoaPods dependencies
         run: pod install --project-directory=ios

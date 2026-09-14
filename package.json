@@ -35,6 +35,7 @@
     "typescript": "~6.0.3"
   },
   "scripts": {
+    "postinstall": "node scripts/patch-expo-modules-jsi.js",
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
