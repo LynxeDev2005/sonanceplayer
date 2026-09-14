@@ -25,17 +25,18 @@ jobs:
   build:
     name: Build sideloadable IPA
     runs-on: macos-15
-    timeout-minutes: 60
+    timeout-minutes: 90
 
     steps:
       - name: Check out source
         uses: actions/checkout@v4
 
-      - name: Select latest Xcode toolchain (Swift 6.2+)
+      - name: Select latest stable Xcode toolchain (Swift 6.2+)
         run: |
           echo "Available Xcode installations:"
           ls -d /Applications/Xcode_*.app 2>/dev/null || true
-          LATEST_XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -n 1)
+          # Filter out beta/preview versions and select the highest stable versioned Xcode
+          LATEST_XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -v -i 'beta' | grep -v -i 'preview' | sort -V | tail -n 1)
           if [ -n "$LATEST_XCODE" ]; then
             echo "Selecting Xcode: $LATEST_XCODE"
             sudo xcode-select -s "$LATEST_XCODE/Contents/Developer"
@@ -72,7 +73,7 @@ jobs:
           path: |
             ios/Pods
             ~/Library/Caches/CocoaPods
-          key: ${{ runner.os }}-pods-${{ hashFiles('package-lock.json') }}
+          key: ${{ runner.os }}-pods-${{ hashFiles('package-lock.json', 'ios/Podfile', 'scripts/patch-podfile.js') }}
           restore-keys: |
             ${{ runner.os }}-pods-
 
@@ -141,7 +142,6 @@ jobs:
         shell: bash
         env:
           GCC_WARN_INHIBIT_ALL_WARNINGS: YES
-          SWIFT_SUPPRESS_WARNINGS: 1
         run: |
           set -euo pipefail
           echo "Starting xcodebuild for scheme: $SCHEME..."
@@ -202,4 +202,4 @@ jobs:
         with:
           name: ${{ env.APP_NAME }}-unsigned-ipa
           path: ${{ env.APP_NAME }}-unsigned.ipa
-          retention-days: 14
+          retention-days: 90
