@@ -1,10 +1,15 @@
 import * as DocumentPicker from 'expo-document-picker';
 import { copyFileToLocal, saveArtwork, listLocalTrackFiles, TRACKS_DIR } from '../data/storage';
-import { insertTrack, getAllTracks } from '../data/database';
+import { insertTracksBatch, getAllTracks, DBTrack } from '../data/database';
 import { extractMetadata } from '../../modules/sonance-audio/src';
 import * as Crypto from 'expo-crypto';
 
-export type ImportProgressCallback = (current: number, total: number, currentName: string, isDuplicate?: boolean) => void;
+export type ImportProgressCallback = (
+  current: number,
+  total: number,
+  currentName: string,
+  isDuplicate?: boolean
+) => void;
 
 export interface ImportResult {
   importedCount: number;
@@ -31,8 +36,32 @@ function normalizeString(str: string): string {
 }
 
 /**
+ * Executes async tasks with a maximum concurrency pool (6 parallel workers)
+ */
+async function runConcurrentPool<T, R>(
+  items: T[],
+  concurrency: number,
+  workerFn: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const index = nextIndex++;
+      results[index] = await workerFn(items[index], index);
+    }
+  }
+
+  const workerCount = Math.min(concurrency, items.length);
+  const workers = Array.from({ length: workerCount }, () => worker());
+  await Promise.all(workers);
+  return results;
+}
+
+/**
  * Imports audio files selected from iOS Files / iCloud Drive
- * Handles multi-select with instant duplicate detection and skipping
+ * Handles multi-select with instant parallel duplicate detection and 6-worker concurrent processing
  */
 export async function importFromFiles(onProgress?: ImportProgressCallback): Promise<ImportResult> {
   const result = await DocumentPicker.getDocumentAsync({
@@ -69,43 +98,48 @@ export async function importFromFiles(onProgress?: ImportProgressCallback): Prom
     existingTracks.map((t) => normalizeString(t.title))
   );
 
-  let importedCount = 0;
-  let duplicateCount = 0;
-  const duplicateNames: string[] = [];
   const totalAssets = result.assets.length;
+  const duplicateNames: string[] = [];
+  const assetsToImport: { asset: (typeof result.assets)[0]; safeName: string; cleanFileName: string; normalizedName: string }[] = [];
 
+  // 1. Fast O(1) Duplicate Pre-Filtering
   for (let i = 0; i < totalAssets; i++) {
     const asset = result.assets[i];
     if (!asset.name || !asset.uri) continue;
 
     const safeName = asset.name.replace(/[/\\?%*:|"<>]/g, '_');
-    const cleanFileName = asset.name.replace(/\.[^/.]+$/, "");
+    const cleanFileName = asset.name.replace(/\.[^/.]+$/, '');
     const normalizedName = normalizeString(cleanFileName);
 
-    // Duplicate Detection: Check filename or normalized title
-    const isDuplicate = existingFileNames.has(safeName.toLowerCase()) || (
-      normalizedName.length > 2 && existingNormalizedTitles.has(normalizedName)
-    );
+    const isDuplicate =
+      existingFileNames.has(safeName.toLowerCase()) ||
+      (normalizedName.length > 2 && existingNormalizedTitles.has(normalizedName));
 
     if (isDuplicate) {
-      duplicateCount++;
       duplicateNames.push(asset.name);
       if (onProgress) {
-        onProgress(i + 1, totalAssets, `Duplicate skipped: ${asset.name}`, true);
+        onProgress(duplicateNames.length + assetsToImport.length, totalAssets, `Duplicate skipped: ${asset.name}`, true);
       }
-      // Continue to next song without blocking the batch!
-      continue;
+    } else {
+      existingFileNames.add(safeName.toLowerCase());
+      if (normalizedName.length > 2) existingNormalizedTitles.add(normalizedName);
+      assetsToImport.push({ asset, safeName, cleanFileName, normalizedName });
     }
+  }
 
-    if (onProgress) {
-      onProgress(i + 1, totalAssets, `Importing ${asset.name}`);
-    }
+  const duplicateCount = duplicateNames.length;
+  let processedCount = duplicateCount;
+  const importedTracks: DBTrack[] = [];
+
+  // 2. Multi-Worker Concurrent Processing (6 parallel workers)
+  const CONCURRENCY = 6;
+
+  await runConcurrentPool(assetsToImport, CONCURRENCY, async (item) => {
+    const { asset, cleanFileName } = item;
 
     try {
-      // 1. Copy to app local storage directory
       const localFilePath = await copyFileToLocal(asset.uri, asset.name);
 
-      // 2. Extract Metadata natively with 8-second timeout protection for large files (30min+)
       const fallbackMeta = {
         title: undefined,
         artist: undefined,
@@ -123,23 +157,21 @@ export async function importFromFiles(onProgress?: ImportProgressCallback): Prom
       const trackId = Crypto.randomUUID();
       let artworkPath: string | null = null;
 
-      // 3. Save Artwork if extracted
       if (metadata.artworkBase64) {
         try {
           artworkPath = await saveArtwork(metadata.artworkBase64, trackId);
         } catch (artErr) {
-          console.warn("Failed to save artwork thumbnail:", artErr);
+          console.warn('Failed to save artwork thumbnail:', artErr);
         }
       }
 
-      // 4. Fallback parser from clean filename
       let title = metadata.title;
       let artist = metadata.artist;
 
       if (!title || title.toLowerCase() === 'unknown' || title.toLowerCase() === 'unknown title') {
         if (cleanFileName.includes(' - ')) {
           const parts = cleanFileName.split(' - ');
-          artist = (!artist || artist.toLowerCase().includes('unknown')) ? parts[0].trim() : artist;
+          artist = !artist || artist.toLowerCase().includes('unknown') ? parts[0].trim() : artist;
           title = parts.slice(1).join(' - ').trim();
         } else {
           title = cleanFileName;
@@ -150,8 +182,7 @@ export async function importFromFiles(onProgress?: ImportProgressCallback): Prom
         artist = 'Unknown Artist';
       }
 
-      // 5. Insert track record into SQLite
-      insertTrack({
+      const dbTrack: DBTrack = {
         id: trackId,
         title: title || cleanFileName || 'Audio Track',
         artist: artist || 'Unknown Artist',
@@ -160,19 +191,26 @@ export async function importFromFiles(onProgress?: ImportProgressCallback): Prom
         file_path: localFilePath,
         artwork_path: artworkPath,
         added_at: Date.now(),
-      });
+      };
 
-      // Register into existing sets for batch uniqueness
-      existingFileNames.add(safeName.toLowerCase());
-      if (normalizedName) existingNormalizedTitles.add(normalizedName);
-      importedCount++;
+      importedTracks.push(dbTrack);
     } catch (error) {
       console.error(`Failed to import track ${asset.name}:`, error);
+    } finally {
+      processedCount++;
+      if (onProgress) {
+        onProgress(processedCount, totalAssets, `Imported: ${asset.name}`);
+      }
     }
+  });
+
+  // 3. Batch Commit all imported tracks in a single atomic SQLite transaction
+  if (importedTracks.length > 0) {
+    insertTracksBatch(importedTracks);
   }
 
   return {
-    importedCount,
+    importedCount: importedTracks.length,
     duplicateCount,
     duplicateNames,
     totalSelected: totalAssets,
@@ -180,7 +218,7 @@ export async function importFromFiles(onProgress?: ImportProgressCallback): Prom
 }
 
 /**
- * Automatically scans local device audio directory for unindexed audio files
+ * Automatically scans local device audio directory for unindexed audio files with concurrency
  */
 export async function scanAndSyncLocalLibrary(onProgress?: ImportProgressCallback): Promise<ImportResult> {
   const localFiles = await listLocalTrackFiles();
@@ -195,16 +233,14 @@ export async function scanAndSyncLocalLibrary(onProgress?: ImportProgressCallbac
     return audioExtensions.has(ext) && !existingFileNames.has(fileName.toLowerCase());
   });
 
-  let importedCount = 0;
   const totalFiles = unindexedFiles.length;
+  let processedCount = 0;
+  const importedTracks: DBTrack[] = [];
 
-  for (let i = 0; i < totalFiles; i++) {
-    const fileName = unindexedFiles[i];
+  const CONCURRENCY = 6;
+
+  await runConcurrentPool(unindexedFiles, CONCURRENCY, async (fileName) => {
     const localFilePath = TRACKS_DIR + fileName;
-
-    if (onProgress) {
-      onProgress(i + 1, totalFiles, `Scanning ${fileName}`);
-    }
 
     try {
       const fallbackMeta = {
@@ -230,21 +266,21 @@ export async function scanAndSyncLocalLibrary(onProgress?: ImportProgressCallbac
         } catch (e) {}
       }
 
-      const cleanFileName = fileName.replace(/\.[^/.]+$/, "");
+      const cleanFileName = fileName.replace(/\.[^/.]+$/, '');
       let title = metadata.title;
       let artist = metadata.artist;
 
       if (!title || title.toLowerCase() === 'unknown') {
         if (cleanFileName.includes(' - ')) {
           const parts = cleanFileName.split(' - ');
-          artist = (!artist || artist.toLowerCase().includes('unknown')) ? parts[0].trim() : artist;
+          artist = !artist || artist.toLowerCase().includes('unknown') ? parts[0].trim() : artist;
           title = parts.slice(1).join(' - ').trim();
         } else {
           title = cleanFileName;
         }
       }
 
-      insertTrack({
+      const dbTrack: DBTrack = {
         id: trackId,
         title: title || cleanFileName || 'Audio Track',
         artist: artist || 'Unknown Artist',
@@ -253,16 +289,25 @@ export async function scanAndSyncLocalLibrary(onProgress?: ImportProgressCallbac
         file_path: localFilePath,
         artwork_path: artworkPath,
         added_at: Date.now(),
-      });
+      };
 
-      importedCount++;
+      importedTracks.push(dbTrack);
     } catch (e) {
-      console.warn("Failed to index local file:", fileName, e);
+      console.warn('Failed to index local file:', fileName, e);
+    } finally {
+      processedCount++;
+      if (onProgress) {
+        onProgress(processedCount, totalFiles, `Scanning: ${fileName}`);
+      }
     }
+  });
+
+  if (importedTracks.length > 0) {
+    insertTracksBatch(importedTracks);
   }
 
   return {
-    importedCount,
+    importedCount: importedTracks.length,
     duplicateCount: localFiles.length - unindexedFiles.length,
     duplicateNames: [],
     totalSelected: localFiles.length,

@@ -90,7 +90,7 @@ export default function ImportScreen() {
 
   const handleDriveImport = () => {
     triggerLightImpact();
-    Alert.alert('Coming Soon', 'Google Drive streaming import will be available in the next update!');
+    router.push('/drive');
   };
 
   return (
@@ -117,7 +117,7 @@ export default function ImportScreen() {
           </View>
           <View style={styles.cardTextContainer}>
             <Text style={styles.cardTitle}>Files / iCloud Drive</Text>
-            <Text style={styles.cardSubtitle}>Select MP3, FLAC, M4A with duplicate auto-skipping</Text>
+            <Text style={styles.cardSubtitle}>Turbo 6-worker multi-select with duplicate auto-skipping</Text>
           </View>
         </TouchableOpacity>
 
@@ -139,24 +139,26 @@ export default function ImportScreen() {
 
         {/* Option 3: Google Drive */}
         <TouchableOpacity 
-          style={styles.importCard} 
+          style={[styles.importCard, { borderColor: 'rgba(59, 130, 246, 0.15)', borderWidth: 1 }]} 
           onPress={handleDriveImport} 
           disabled={isImporting}
           activeOpacity={0.8}
         >
-          <View style={[styles.iconContainer, { backgroundColor: 'rgba(0,0,0,0.04)' }]}>
-            <Ionicons name="logo-google" size={26} color={colors.textSecondary} />
+          <View style={[styles.iconContainer, { backgroundColor: 'rgba(59, 130, 246, 0.08)' }]}>
+            <Ionicons name="logo-google" size={26} color={colors.tint} />
           </View>
           <View style={styles.cardTextContainer}>
             <Text style={styles.cardTitle}>Google Drive</Text>
-            <Text style={styles.cardSubtitle}>Sync and stream directly from your Google Drive</Text>
+            <Text style={styles.cardSubtitle}>Stream and sync from your personal Google Drive</Text>
           </View>
+          <Ionicons name="chevron-forward" size={20} color={colors.textSecondary} />
         </TouchableOpacity>
 
         {isImporting && (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color={colors.tint} />
             <Text style={styles.loadingText}>{progressText}</Text>
+            <Text style={styles.loadingSubtext}>⚡ Turbo 6-Worker Concurrency • APFS NVMe Batching</Text>
           </View>
         )}
       </View>
@@ -234,10 +236,27 @@ const styles = StyleSheet.create({
   loadingContainer: {
     alignItems: 'center',
     marginTop: spacing.xl,
+    backgroundColor: colors.white,
+    padding: spacing.lg,
+    borderRadius: radii.xl,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 2,
   },
   loadingText: {
     marginTop: spacing.md,
     fontSize: typography.sizes.sm,
+    color: colors.text,
+    textAlign: 'center',
+    lineHeight: 20,
+    fontWeight: '500',
+  },
+  loadingSubtext: {
+    marginTop: spacing.xs,
+    fontSize: 11,
     color: colors.textSecondary,
+    fontStyle: 'italic',
   }
 });

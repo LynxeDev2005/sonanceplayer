@@ -136,6 +136,31 @@ export function insertTrack(track: DBTrack) {
   }
 }
 
+export function insertTracksBatch(tracks: DBTrack[]) {
+  if (!tracks || tracks.length === 0) return;
+  try {
+    db.withTransactionSync(() => {
+      const statement = db.prepareSync(
+        'INSERT OR REPLACE INTO tracks (id, title, artist, album, duration, file_path, artwork_path, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+      );
+      for (const track of tracks) {
+        statement.executeSync([
+          track.id,
+          track.title,
+          track.artist,
+          track.album,
+          track.duration,
+          track.file_path,
+          track.artwork_path,
+          track.added_at
+        ]);
+      }
+    });
+  } catch (e) {
+    console.warn("Failed to batch insert tracks:", e);
+  }
+}
+
 export function updateTrackDuration(trackId: string, duration: number) {
   if (!trackId || duration <= 0 || isNaN(duration)) return;
   try {
