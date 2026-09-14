@@ -31,11 +31,8 @@ jobs:
           rm -rf ~/Library/Developer/Xcode/DerivedData
           rm -rf ~/.cocoapods/repos/master
 
-      - name: Generate the iOS project
-        run: npx expo prebuild --platform ios --non-interactive --no-install --clean
-
-      - name: Install CocoaPods dependencies
-        run: pod install --project-directory=ios --repo-update --verbose
+      - name: Generate the iOS project and install pods
+        run: npx expo prebuild --platform ios --non-interactive --clean
 
       - name: Build without Apple signing assets
         shell: bash
