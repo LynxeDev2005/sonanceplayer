@@ -111,12 +111,15 @@ class PlayerControllerClass {
   }
 
   public loadTrack(track: NativeAudio.TrackInfo) {
+    this.queue = [track];
     NativeAudio.loadTrack(track);
+    this.play();
   }
 
   public setQueue(tracks: NativeAudio.TrackInfo[], startIndex: number = 0) {
     this.queue = tracks;
     NativeAudio.setQueue(tracks, startIndex);
+    this.play();
   }
 
   public playNext(track: NativeAudio.TrackInfo) {

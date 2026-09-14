@@ -89,6 +89,40 @@ public class SonanceAudioModule: Module {
         }
         SonanceAudioEngine.shared.setQueue(tracks: tracks, startIndex: startIndex)
     }
+
+    Function("addToQueue") { (trackDict: [String: Any]) in
+        guard let id = trackDict["id"] as? String,
+              let title = trackDict["title"] as? String,
+              let artist = trackDict["artist"] as? String,
+              let filePath = trackDict["filePath"] as? String else { return }
+        let duration = (trackDict["duration"] as? Double) ?? (Double(trackDict["duration"] as? String ?? "") ?? nil)
+        let track = SonanceTrack(
+            id: id,
+            title: title,
+            artist: artist,
+            filePath: filePath,
+            artworkUrl: trackDict["artworkUrl"] as? String,
+            duration: duration
+        )
+        SonanceAudioEngine.shared.addToQueue(track: track)
+    }
+
+    Function("playNext") { (trackDict: [String: Any]) in
+        guard let id = trackDict["id"] as? String,
+              let title = trackDict["title"] as? String,
+              let artist = trackDict["artist"] as? String,
+              let filePath = trackDict["filePath"] as? String else { return }
+        let duration = (trackDict["duration"] as? Double) ?? (Double(trackDict["duration"] as? String ?? "") ?? nil)
+        let track = SonanceTrack(
+            id: id,
+            title: title,
+            artist: artist,
+            filePath: filePath,
+            artworkUrl: trackDict["artworkUrl"] as? String,
+            duration: duration
+        )
+        SonanceAudioEngine.shared.playNext(track: track)
+    }
       
     AsyncFunction("extractMetadata") { (filePath: String, promise: Promise) in
         let fileURL: URL

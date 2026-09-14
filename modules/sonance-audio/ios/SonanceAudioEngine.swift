@@ -61,12 +61,36 @@ public class SonanceAudioEngine {
         self.queue = tracks
         self.currentIndex = startIndex
         loadCurrentTrack()
+        play()
     }
     
     public func loadTrack(track: SonanceTrack) {
         self.queue = [track]
         self.currentIndex = 0
         loadCurrentTrack()
+        play()
+    }
+
+    public func addToQueue(track: SonanceTrack) {
+        self.queue.append(track)
+        if self.queue.count == 1 {
+            self.currentIndex = 0
+            loadCurrentTrack()
+        }
+        broadcastState()
+    }
+
+    public func playNext(track: SonanceTrack) {
+        if currentIndex >= 0 && currentIndex < queue.count {
+            queue.insert(track, at: currentIndex + 1)
+        } else {
+            queue.append(track)
+            if queue.count == 1 {
+                currentIndex = 0
+                loadCurrentTrack()
+            }
+        }
+        broadcastState()
     }
     
     private func loadCurrentTrack() {
