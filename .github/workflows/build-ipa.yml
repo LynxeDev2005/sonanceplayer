@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       scheme:
-        description: "Xcode scheme to build (leave blank to auto-detect the first scheme)"
+        description: "Xcode scheme to build (leave blank to auto-detect the app scheme)"
         required: false
         default: ""
 
@@ -35,8 +35,6 @@ jobs:
         run: |
           echo "Available Xcode installations:"
           ls -d /Applications/Xcode_*.app 2>/dev/null || true
-          # Only match versioned "Xcode_X.Y.app" bundles - the bare
-          # "Xcode.app" symlink some images ship confuses `sort -V`.
           LATEST_XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | sort -V | tail -n 1)
           if [ -n "$LATEST_XCODE" ]; then
             echo "Selecting Xcode: $LATEST_XCODE"
@@ -74,9 +72,6 @@ jobs:
           path: |
             ios/Pods
             ~/Library/Caches/CocoaPods
-          # Podfile.lock doesn't exist yet at this point (prebuild --clean
-          # wipes ios/ every run), so key on the lockfile that actually
-          # determines native dependency versions.
           key: ${{ runner.os }}-pods-${{ hashFiles('package-lock.json') }}
           restore-keys: |
             ${{ runner.os }}-pods-
@@ -89,44 +84,71 @@ jobs:
             echo "No Podfile found in ios/, skipping pod install."
           fi
 
-      - name: Build without Apple signing assets
+      - name: Resolve Xcode scheme and target paths
         shell: bash
         env:
-          GCC_WARN_INHIBIT_ALL_WARNINGS: YES
-          SWIFT_SUPPRESS_WARNINGS: 1
           SCHEME_OVERRIDE: ${{ inputs.scheme }}
         run: |
           set -euo pipefail
 
-          # Debug: list ios directory contents
-          echo "=== iOS directory contents ==="
-          ls -la ios/
-
-          # Find workspace
           workspace="$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)"
           if [ -z "$workspace" ]; then
             echo "ERROR: No .xcworkspace found in ios/"
             exit 1
           fi
-          echo "Found workspace: $workspace"
+          echo "WORKSPACE=$workspace" >> "$GITHUB_ENV"
 
-          # Find scheme (or use the manual override from workflow_dispatch)
+          proj_name="$(basename "$(find ios -maxdepth 1 -name '*.xcodeproj' -print -quit)" .xcodeproj)"
+          echo "PROJ_NAME=$proj_name" >> "$GITHUB_ENV"
+
+          # 1. Check override -> 2. Match project name -> 3. First non-Pods scheme
           if [ -n "${SCHEME_OVERRIDE:-}" ]; then
             scheme="$SCHEME_OVERRIDE"
-            echo "Using scheme override: $scheme"
           else
-            scheme="$(xcodebuild -list -workspace "$workspace" 2>/dev/null | awk '/Schemes:/{found=1; next} found && NF {gsub(/^[[:space:]]+/, ""); print; exit}')"
+            schemes="$(xcodebuild -list -workspace "$workspace" 2>/dev/null | awk '/Schemes:/{flag=1; next} flag && NF {sub(/^[ \t]+/, ""); print}')"
+            echo "Available workspace schemes:"
+            echo "$schemes"
+            
+            if echo "$schemes" | grep -qx "$proj_name"; then
+              scheme="$proj_name"
+            else
+              scheme="$(echo "$schemes" | grep -v '^Pods-' | grep -v '^Expo' | head -n 1)"
+            fi
           fi
+
           if [ -z "$scheme" ]; then
-            echo "ERROR: No scheme found in workspace"
+            echo "ERROR: Could not resolve a valid application scheme"
             exit 1
           fi
-          echo "Building scheme: $scheme"
-          echo "Starting xcodebuild..."
+          echo "SCHEME=$scheme" >> "$GITHUB_ENV"
+          echo "Resolved application scheme: $scheme"
+
+          # Query build settings directly from xcodebuild to verify target type and path
+          build_settings="$(xcodebuild -showBuildSettings -workspace "$workspace" -scheme "$scheme" -configuration Release -sdk iphoneos -derivedDataPath build 2>/dev/null)"
+          target_build_dir="$(echo "$build_settings" | awk -F ' = ' '$1 ~ /^[ \t]*TARGET_BUILD_DIR$/ {print $2; exit}')"
+          wrapper_name="$(echo "$build_settings" | awk -F ' = ' '$1 ~ /^[ \t]*WRAPPER_NAME$/ {print $2; exit}')"
+
+          if [[ "$wrapper_name" != *.app ]]; then
+            echo "ERROR: Scheme '$scheme' produces '$wrapper_name' instead of a .app bundle!"
+            exit 1
+          fi
+
+          app_bundle_path="${target_build_dir}/${wrapper_name}"
+          echo "APP_BUNDLE_PATH=$app_bundle_path" >> "$GITHUB_ENV"
+          echo "Expected .app bundle path: $app_bundle_path"
+
+      - name: Build unsigned release application
+        shell: bash
+        env:
+          GCC_WARN_INHIBIT_ALL_WARNINGS: YES
+          SWIFT_SUPPRESS_WARNINGS: 1
+        run: |
+          set -euo pipefail
+          echo "Starting xcodebuild for scheme: $SCHEME..."
 
           xcodebuild build \
-            -workspace "$workspace" \
-            -scheme "$scheme" \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
             -destination "generic/platform=iOS" \
@@ -141,6 +163,17 @@ jobs:
             PROVISIONING_PROFILE_SPECIFIER="" \
             2>&1 | tee xcodebuild.log
 
+      - name: Verify build output
+        run: |
+          if [ -d "$APP_BUNDLE_PATH" ]; then
+            echo "✓ .app bundle successfully built at: $APP_BUNDLE_PATH"
+            ls -lh "$APP_BUNDLE_PATH"
+          else
+            echo "✗ .app bundle NOT found at: $APP_BUNDLE_PATH"
+            find build -name "*.app" -type d 2>/dev/null || echo "No .app found"
+            exit 1
+          fi
+
       - name: Upload build log on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -153,20 +186,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app_path="$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' -type d -print -quit)"
-          if [ -z "$app_path" ]; then
-            echo "ERROR: No .app bundle found in build products"
-            exit 1
-          fi
-          echo "Found app bundle: $app_path"
 
+          echo "Packaging application from: $APP_BUNDLE_PATH"
           rm -rf package "${APP_NAME}-unsigned.ipa"
           mkdir -p package/Payload
-          cp -R "$app_path" package/Payload/
+          cp -R "$APP_BUNDLE_PATH" package/Payload/
           (
             cd package
             zip -qry "../${APP_NAME}-unsigned.ipa" Payload
           )
+          echo "Successfully created ${APP_NAME}-unsigned.ipa"
 
       - name: Upload IPA
         uses: actions/upload-artifact@v4
