@@ -26,11 +26,16 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
+      - name: Clean build caches
+        run: |
+          rm -rf ~/Library/Developer/Xcode/DerivedData
+          rm -rf ~/.cocoapods/repos/master
+
       - name: Generate the iOS project
-        run: npx expo prebuild --platform ios --non-interactive --no-install
+        run: npx expo prebuild --platform ios --non-interactive --no-install --clean
 
       - name: Install CocoaPods dependencies
-        run: pod install --project-directory=ios
+        run: pod install --project-directory=ios --repo-update --verbose
 
       - name: Build without Apple signing assets
         shell: bash
@@ -47,10 +52,18 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
+            -verbose \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            PROVISIONING_PROFILE_SPECIFIER=""
+            PROVISIONING_PROFILE_SPECIFIER="" \
+            2>&1 | tee xcodebuild.log
+          
+          if [ $? -ne 0 ]; then
+            echo "=== Build failed. Last 200 lines of xcodebuild.log ==="
+            tail -n 200 xcodebuild.log
+            exit 1
+          fi
 
       - name: Package the unsigned IPA
         shell: bash
