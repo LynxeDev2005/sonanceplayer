@@ -8,7 +8,6 @@ import { extractMetadata } from '../../modules/sonance-audio/src';
 
 WebBrowser.maybeCompleteAuthSession();
 
-// Default or custom client ID configured by user in Google Cloud Console
 export const GOOGLE_DRIVE_SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
@@ -44,6 +43,7 @@ const SETTINGS_KEY_USER = 'sonance_gdrive_user';
 
 class GoogleDriveServiceClass {
   private customClientId: string = '';
+  private customClientSecret: string = '';
   private accessToken: string | null = null;
   private currentUser: DriveUser | null = null;
 
@@ -61,6 +61,14 @@ class GoogleDriveServiceClass {
 
   public getCustomClientId(): string {
     return this.customClientId;
+  }
+
+  public setCustomClientSecret(secret: string) {
+    this.customClientSecret = secret.trim();
+  }
+
+  public getCustomClientSecret(): string {
+    return this.customClientSecret;
   }
 
   public isAuthenticated(): boolean {
@@ -93,6 +101,48 @@ class GoogleDriveServiceClass {
       scheme: 'sonance',
       path: 'oauthredirect',
     });
+  }
+
+  /**
+   * Exchanges an authorization code for an access token
+   */
+  public async exchangeCodeForToken(
+    code: string,
+    redirectUri: string,
+    codeVerifier?: string
+  ): Promise<string> {
+    const bodyObj: Record<string, string> = {
+      client_id: this.customClientId,
+      code,
+      grant_type: 'authorization_code',
+      redirect_uri: redirectUri,
+    };
+    if (this.customClientSecret) {
+      bodyObj.client_secret = this.customClientSecret;
+    }
+    if (codeVerifier) {
+      bodyObj.code_verifier = codeVerifier;
+    }
+
+    const formBody = Object.keys(bodyObj)
+      .map((k) => encodeURIComponent(k) + '=' + encodeURIComponent(bodyObj[k]))
+      .join('&');
+
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: formBody,
+    });
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      throw new Error(errData.error_description || errData.error || `HTTP ${res.status}: Failed to exchange token`);
+    }
+
+    const tokenData = await res.json();
+    return tokenData.access_token;
   }
 
   /**

@@ -71,13 +71,29 @@ export default function GoogleDriveScreen() {
   );
 
   useEffect(() => {
-    if (response?.type === 'success' && response.params.access_token) {
-      handleAuthSuccess(response.params.access_token);
+    if (response?.type === 'success') {
+      if (response.params.access_token) {
+        handleAuthSuccess(response.params.access_token);
+      } else if (response.params.code) {
+        handleAuthCode(response.params.code, request?.codeVerifier);
+      }
     } else if (response?.type === 'error') {
       triggerError();
       Alert.alert('Sign-In Error', response.error?.message || 'Failed to authenticate with Google.');
     }
   }, [response]);
+
+  const handleAuthCode = async (code: string, codeVerifier?: string) => {
+    setIsLoading(true);
+    try {
+      const token = await GoogleDriveService.exchangeCodeForToken(code, redirectUri, codeVerifier);
+      await handleAuthSuccess(token);
+    } catch (err: any) {
+      triggerError();
+      Alert.alert('Token Exchange Failed', err.message || 'Could not complete Google authentication.');
+      setIsLoading(false);
+    }
+  };
 
   const handleAuthSuccess = async (token: string) => {
     setIsLoading(true);
