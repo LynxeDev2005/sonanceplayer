@@ -29,7 +29,8 @@
       "expo-router",
       "expo-status-bar",
       "expo-sqlite",
-      "expo-web-browser"
+      "expo-web-browser",
+      "expo-updates"
     ],
     "extra": {
       "router": {},

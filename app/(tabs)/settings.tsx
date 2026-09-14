@@ -9,11 +9,15 @@ import { router, useFocusEffect } from 'expo-router';
 import { DEFAULT_EQUALIZER_STATE, EqualizerState, VLC_EQUALIZER_PRESETS } from '../../src/data/equalizerPresets';
 import { PlayerController } from '../../src/player/PlayerController';
 
+import * as Updates from 'expo-updates';
+import { triggerSuccess, triggerError } from '../../src/utils/haptics';
+
 export default function SettingsScreen() {
   const [trackCount, setTrackCount] = useState(0);
   const [losslessAudio, setLosslessAudio] = useState(true);
   const [hapticFeedback, setHapticFeedbackState] = useState(getHapticsEnabled());
   const [equalizer, setEqualizer] = useState<EqualizerState>(DEFAULT_EQUALIZER_STATE);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -27,6 +31,47 @@ export default function SettingsScreen() {
       }
     }, [])
   );
+
+  const handleCheckForUpdates = async () => {
+    if (__DEV__) {
+      Alert.alert("Development Mode", "Over-the-air updates are active on production builds.");
+      return;
+    }
+    setIsCheckingUpdate(true);
+    triggerLightImpact();
+    try {
+      const update = await Updates.checkForUpdateAsync();
+      if (update.isAvailable) {
+        Alert.alert(
+          "Update Available",
+          "A new over-the-air update is available. Download and reload now?",
+          [
+            { text: "Later", style: "cancel" },
+            {
+              text: "Update Now",
+              onPress: async () => {
+                try {
+                  await Updates.fetchUpdateAsync();
+                  triggerSuccess();
+                  await Updates.reloadAsync();
+                } catch (e: any) {
+                  Alert.alert("Update Error", e.message || "Failed to download update.");
+                }
+              }
+            }
+          ]
+        );
+      } else {
+        triggerSuccess();
+        Alert.alert("Up to Date", "You are already using the latest version of Sonance.");
+      }
+    } catch (e: any) {
+      triggerError();
+      Alert.alert("Update Check Failed", e.message || "Unable to reach update server.");
+    } finally {
+      setIsCheckingUpdate(false);
+    }
+  };
 
   const applyEqualizer = (next: EqualizerState) => {
     setEqualizer(next);
@@ -192,19 +237,50 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Section: Over-the-Air Updates */}
+        <Text style={styles.sectionHeader}>OVER-THE-AIR UPDATES</Text>
+        <View style={styles.card}>
+          <TouchableOpacity 
+            style={styles.row} 
+            onPress={handleCheckForUpdates} 
+            disabled={isCheckingUpdate}
+            activeOpacity={0.7}
+          >
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconBox, { backgroundColor: '#3B82F6' }]}>
+                <Ionicons name="cloud-download" size={18} color={colors.white} />
+              </View>
+              <View>
+                <Text style={styles.rowLabel}>Check for Updates</Text>
+                <Text style={styles.rowHint}>
+                  {isCheckingUpdate ? "Connecting to update server..." : `Update ID: ${Updates.updateId ? Updates.updateId.slice(0, 8) : 'Latest (Local)'}`}
+                </Text>
+              </View>
+            </View>
+            <Ionicons name="refresh" size={18} color={colors.tint} />
+          </TouchableOpacity>
+        </View>
+
         {/* Section: About */}
         <Text style={styles.sectionHeader}>ABOUT</Text>
         <View style={styles.card}>
           <View style={styles.row}>
             <Text style={styles.rowLabel}>App Version</Text>
-            <Text style={styles.rowValue}>1.0.0 (Release Candidate)</Text>
+            <Text style={styles.rowValue}>1.0.0</Text>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View style={styles.row}>
+            <Text style={styles.rowLabel}>Channel</Text>
+            <Text style={styles.rowValue}>{Updates.channel || 'master'}</Text>
           </View>
 
           <View style={styles.divider} />
 
           <View style={styles.row}>
             <Text style={styles.rowLabel}>Architecture</Text>
-            <Text style={styles.rowValue}>Swift + Expo SDK 57</Text>
+            <Text style={styles.rowValue}>Swift Native Engine + Expo 57</Text>
           </View>
         </View>
       </ScrollView>
