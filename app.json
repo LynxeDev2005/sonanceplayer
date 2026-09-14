@@ -14,6 +14,14 @@
         "ITSAppUsesNonExemptEncryption": false,
         "UIFileSharingEnabled": true,
         "LSSupportsOpeningDocumentsInPlace": true,
+        "CFBundleURLTypes": [
+          {
+            "CFBundleURLSchemes": [
+              "sonance",
+              "com.googleusercontent.apps.146606044771-nr9953rcpjbv860l4oogjqjrf0glj18i"
+            ]
+          }
+        ],
         "UIBackgroundModes": [
           "audio"
         ],

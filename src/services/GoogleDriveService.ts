@@ -97,9 +97,14 @@ class GoogleDriveServiceClass {
   }
 
   /**
-   * Generates the OAuth redirect URI for Sonance
+   * Generates the OAuth redirect URI for Sonance (complies with Google iOS Native RFC 8252 policy)
    */
-  public getRedirectUri(): string {
+  public getRedirectUri(clientId?: string): string {
+    const id = clientId || this.customClientId;
+    if (id && id.includes('.apps.googleusercontent.com')) {
+      const prefix = id.replace('.apps.googleusercontent.com', '');
+      return `com.googleusercontent.apps.${prefix}:/oauthredirect`;
+    }
     return AuthSession.makeRedirectUri({
       scheme: 'sonance',
       path: 'oauthredirect',
