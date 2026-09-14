@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { colors, typography, spacing, radii } from '../src/theme';
-import { importFromFiles, scanAndSyncLocalLibrary, ImportResult } from '../src/services/ImportService';
+import { importFromFiles, scanAndSyncLocalLibrary, scanFolderAndImport, ImportResult } from '../src/services/ImportService';
 import { triggerSuccess, triggerLightImpact, triggerError } from '../src/utils/haptics';
 
 export default function ImportScreen() {
@@ -47,6 +47,49 @@ export default function ImportScreen() {
     } catch (error) {
       triggerError();
       Alert.alert('Import Error', 'An error occurred while importing audio files.');
+      console.error(error);
+    } finally {
+      setIsImporting(false);
+      setProgressText('');
+    }
+  };
+
+  const handleFolderScan = async () => {
+    setIsImporting(true);
+    setProgressText('Opening folder picker...');
+    triggerLightImpact();
+
+    try {
+      const result = await scanFolderAndImport((current, total, currentName, isDuplicate) => {
+        setProgressText(
+          isDuplicate
+            ? `Scanning ${current}/${total}\n⚠️ ${currentName}`
+            : `Importing ${current}/${total}\n🎵 ${currentName}`
+        );
+      });
+
+      if (result.importedCount > 0) {
+        triggerSuccess();
+        const dupMsg = result.duplicateCount > 0 
+          ? `\n(${result.duplicateCount} duplicate ${result.duplicateCount === 1 ? 'song was' : 'songs were'} skipped)`
+          : '';
+        Alert.alert(
+          'Folder Scan Complete',
+          `Found and imported ${result.importedCount} new ${result.importedCount === 1 ? 'song' : 'songs'} from folder!${dupMsg}`,
+          [{ text: 'OK', onPress: () => router.back() }]
+        );
+      } else if (result.duplicateCount > 0) {
+        triggerLightImpact();
+        Alert.alert(
+          'Duplicates Detected',
+          `All ${result.duplicateCount} songs found in the folder are already in your library.`
+        );
+      } else if (result.totalSelected > 0) {
+        Alert.alert('Notice', 'No supported audio files were found in the selected folder.');
+      }
+    } catch (error) {
+      triggerError();
+      Alert.alert('Scan Error', 'An error occurred while scanning the folder.');
       console.error(error);
     } finally {
       setIsImporting(false);
@@ -113,15 +156,31 @@ export default function ImportScreen() {
           activeOpacity={0.8}
         >
           <View style={[styles.iconContainer, { backgroundColor: 'rgba(59, 130, 246, 0.1)' }]}>
-            <Ionicons name="folder-open" size={28} color={colors.tint} />
+            <Ionicons name="document-text" size={26} color={colors.tint} />
           </View>
           <View style={styles.cardTextContainer}>
-            <Text style={styles.cardTitle}>Files / iCloud Drive</Text>
-            <Text style={styles.cardSubtitle}>Turbo 6-worker multi-select with duplicate auto-skipping</Text>
+            <Text style={styles.cardTitle}>Select Audio Files</Text>
+            <Text style={styles.cardSubtitle}>Multi-select MP3, FLAC, M4A with duplicate skipping</Text>
           </View>
         </TouchableOpacity>
 
-        {/* Option 2: Auto Scan Device Storage */}
+        {/* Option 2: Auto Scan Selected Folder */}
+        <TouchableOpacity 
+          style={[styles.importCard, { borderColor: 'rgba(245, 158, 11, 0.3)', borderWidth: 1 }]} 
+          onPress={handleFolderScan}
+          disabled={isImporting}
+          activeOpacity={0.8}
+        >
+          <View style={[styles.iconContainer, { backgroundColor: 'rgba(245, 158, 11, 0.1)' }]}>
+            <Ionicons name="folder-open" size={26} color="#F59E0B" />
+          </View>
+          <View style={styles.cardTextContainer}>
+            <Text style={styles.cardTitle}>Auto Scan Folder</Text>
+            <Text style={styles.cardSubtitle}>Pick any folder to deeply scan & import all songs inside</Text>
+          </View>
+        </TouchableOpacity>
+
+        {/* Option 3: Auto Scan Device Storage */}
         <TouchableOpacity 
           style={styles.importCard} 
           onPress={handleAutoScan} 
@@ -132,12 +191,12 @@ export default function ImportScreen() {
             <Ionicons name="sync" size={26} color="#10B981" />
           </View>
           <View style={styles.cardTextContainer}>
-            <Text style={styles.cardTitle}>Auto Scan Device Storage</Text>
-            <Text style={styles.cardSubtitle}>Scan app storage for unindexed audio files</Text>
+            <Text style={styles.cardTitle}>Auto Scan App Storage</Text>
+            <Text style={styles.cardSubtitle}>Scan local documents directory for unindexed files</Text>
           </View>
         </TouchableOpacity>
 
-        {/* Option 3: Google Drive */}
+        {/* Option 4: Google Drive */}
         <TouchableOpacity 
           style={[styles.importCard, { borderColor: 'rgba(59, 130, 246, 0.15)', borderWidth: 1 }]} 
           onPress={handleDriveImport} 
