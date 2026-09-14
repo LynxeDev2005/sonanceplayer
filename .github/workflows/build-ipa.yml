@@ -11,13 +11,11 @@ permissions:
 jobs:
   build:
     name: Build sideloadable IPA
-    # Expo SDK 57 requires Xcode 26.4+ (Swift 6.2+). macOS 15's default
-    # Xcode 16.4 toolchain cannot resolve Expo's Apple Swift packages.
-    runs-on: macos-26
+    runs-on: macos-15
 
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Verify Apple build toolchain
         run: |
@@ -25,7 +23,7 @@ jobs:
           swift --version
 
       - name: Set up Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
@@ -33,22 +31,11 @@ jobs:
       - name: Install JavaScript dependencies
         run: npm ci
 
-      - name: Clean build caches
-        run: |
-          rm -rf ~/Library/Developer/Xcode/DerivedData
-          rm -rf ~/.cocoapods/repos/master
-
-      - name: Generate the iOS project and install pods
-        run: npx expo prebuild --platform ios --non-interactive --clean
-
-      - name: Clean pod caches
-        run: |
-          rm -rf ios/Pods
-          rm -rf ios/Podfile.lock
-          pod cache clean --all
+      - name: Generate the iOS project
+        run: npx expo prebuild --platform ios --clean
 
       - name: Install CocoaPods dependencies
-        run: pod install --project-directory=ios --repo-update --verbose
+        run: pod install --project-directory=ios
 
       - name: Build without Apple signing assets
         shell: bash
@@ -63,8 +50,6 @@ jobs:
           workspace="$(find ios -maxdepth 1 -name '*.xcworkspace' -print -quit)"
           if [ -z "$workspace" ]; then
             echo "ERROR: No .xcworkspace found in ios/"
-            echo "=== Full ios/ structure ==="
-            find ios -type f -name "*.xcodeproj" -o -name "*.xcworkspace" | head -20
             exit 1
           fi
           
@@ -73,8 +58,6 @@ jobs:
           scheme="$(xcodebuild -list -workspace "$workspace" 2>/dev/null | awk '/Schemes:/{found=1; next} found && NF {gsub(/^[[:space:]]+/, ""); print; exit}')"
           if [ -z "$scheme" ]; then
             echo "ERROR: No scheme found in workspace"
-            echo "=== xcodebuild -list output ==="
-            xcodebuild -list -workspace "$workspace" 2>/dev/null || true
             exit 1
           fi
           
@@ -87,29 +70,23 @@ jobs:
             -configuration Release \
             -sdk iphoneos \
             -derivedDataPath build \
-            -verbose \
-            ONLY_ACTIVE_ARCH=NO \
-            EXCLUDED_ARCHS=x86_64 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            PROVISIONING_PROFILE_SPECIFIER="" \
-            2>&1 | tee xcodebuild.log
-          
-          if [ $? -ne 0 ]; then
-            echo "=== Build failed. Last 200 lines of xcodebuild.log ==="
-            tail -n 200 xcodebuild.log
-            exit 1
-          fi
+            PROVISIONING_PROFILE_SPECIFIER=""
 
       - name: Package the unsigned IPA
         shell: bash
         run: |
           set -euo pipefail
           app_path="$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' -type d -print -quit)"
-          test -n "$app_path"
+          if [ -z "$app_path" ]; then
+            echo "ERROR: No .app bundle found in build products"
+            exit 1
+          fi
+          echo "Found app bundle: $app_path"
 
-          rm -rf package
+          rm -rf package Sonance-unsigned.ipa
           mkdir -p package/Payload
           cp -R "$app_path" package/Payload/
           (
