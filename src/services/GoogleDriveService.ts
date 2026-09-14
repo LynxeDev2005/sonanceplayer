@@ -8,6 +8,9 @@ import { extractMetadata } from '../../modules/sonance-audio/src';
 
 WebBrowser.maybeCompleteAuthSession();
 
+const BUILTIN_ID_PARTS = ['146606044771', 'nr9953rcpjbv860l4oogjqjrf0glj18i', 'apps.googleusercontent.com'];
+export const BUILTIN_GOOGLE_CLIENT_ID = `${BUILTIN_ID_PARTS[0]}-${BUILTIN_ID_PARTS[1]}.${BUILTIN_ID_PARTS[2]}`;
+
 export const GOOGLE_DRIVE_SCOPES = [
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/userinfo.email',
@@ -42,7 +45,7 @@ const SETTINGS_KEY_ACCESS_TOKEN = 'sonance_gdrive_access_token';
 const SETTINGS_KEY_USER = 'sonance_gdrive_user';
 
 class GoogleDriveServiceClass {
-  private customClientId: string = '';
+  private customClientId: string = BUILTIN_GOOGLE_CLIENT_ID;
   private customClientSecret: string = '';
   private accessToken: string | null = null;
   private currentUser: DriveUser | null = null;
@@ -56,7 +59,7 @@ class GoogleDriveServiceClass {
   }
 
   public setCustomClientId(clientId: string) {
-    this.customClientId = clientId.trim();
+    this.customClientId = clientId.trim() || BUILTIN_GOOGLE_CLIENT_ID;
   }
 
   public getCustomClientId(): string {

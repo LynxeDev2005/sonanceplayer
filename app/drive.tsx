@@ -21,6 +21,7 @@ import {
   DriveFile,
   DriveUser,
   GOOGLE_DRIVE_SCOPES,
+  BUILTIN_GOOGLE_CLIENT_ID,
 } from '../src/services/GoogleDriveService';
 import { triggerSuccess, triggerLightImpact, triggerError } from '../src/utils/haptics';
 
@@ -32,8 +33,8 @@ const discovery = {
 };
 
 export default function GoogleDriveScreen() {
-  const [clientIdInput, setClientIdInput] = useState('');
-  const [clientId, setClientId] = useState('');
+  const [clientIdInput, setClientIdInput] = useState(BUILTIN_GOOGLE_CLIENT_ID);
+  const [clientId, setClientId] = useState(BUILTIN_GOOGLE_CLIENT_ID);
   const [user, setUser] = useState<DriveUser | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [showSetupGuide, setShowSetupGuide] = useState(false);
